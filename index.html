@@ -1668,12 +1668,12 @@ function titleItems(){
 }
 
 /* ------------------------------- title --------------------------------- */
-let titleDragonY = 372;
+let titleDragonY = 322;
 function drawTitle(){
   drawWind();
   titleDragonY -= 0.45;
-  if (titleDragonY < 268) titleDragonY = 372;
-  blit(SPR.cindu[((G.t*7)|0)%3], CFG.W/2, titleDragonY, 0, 0.22, 1.5);
+  if (titleDragonY < 252) titleDragonY = 322;
+  blit(SPR.cindu[((G.t*7)|0)%3], CFG.W/2, titleDragonY, 0, 0.20, 1.2);
   glowTxt('C I N D U', CFG.W/2, 150, 44, CFG.AMBER, 'center', 22);
   glowTxt('DRAGON LORD', CFG.W/2, 196, 20, CFG.PURPLE, 'center', 14);
   txt('RECLAIM THE SCATTERED SOUL', CFG.W/2, 232, 12, amber(0.55));
