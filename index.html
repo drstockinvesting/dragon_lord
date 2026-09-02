@@ -54,7 +54,7 @@ const CFG = {
   LORD_SOUL_BONUS: 1,                            // a lord = 1 whole soul
 
   // One step applied at each dragon-lord kill. Difficulty is a staircase.
-  PHASE_STEP: { hp:1.18, speed:1.06, fireRate:1.10, bulletSpeed:1.05,
+  PHASE_STEP: { hp:1.15, speed:1.06, fireRate:1.10, bulletSpeed:1.05,
                 spawn:0.92, maxConc:0.7 },
 
   ENEMY: { hp:20, speed:74, fireRate:0.30, bulletSpeed:215, r:15, bulletR:6,
@@ -102,16 +102,16 @@ const PHASES = [
 // Nine dragon lords, then Eanu.
 const LORDS = [
   { name:'VURATH THE EMBERWING', hp:420,  pat:['radial'] },
-  { name:'SKOLL THE ASHMAW',     hp:620,  pat:['sweep'] },
-  { name:'MEREXIS THE BROODER',  pat:['summon','radial'], hp:880 },
-  { name:'TYRN THE SWIFT LANCE', hp:1150, pat:['volley','sweep'] },
-  { name:'AZKALOR RINGBEARER',   hp:1500, pat:['rings','volley'] },
-  { name:'NYXHEIM THE COILED',   hp:1900, pat:['spiral','radial'] },
-  { name:'DRAVETH THE CHARGER',  hp:2400, pat:['charge','volley'] },
-  { name:'SOLARETH THE CROSS',   hp:3000, pat:['cross','summon'] },
-  { name:'VORGAAL SOULEATER',    hp:3800, pat:['spiral','rings','volley'] },
+  { name:'SKOLL THE ASHMAW',     hp:600,  pat:['sweep'] },
+  { name:'MEREXIS THE BROODER',  hp:820,  pat:['summon','radial'] },
+  { name:'TYRN THE SWIFT LANCE', hp:1050, pat:['volley','sweep'] },
+  { name:'AZKALOR RINGBEARER',   hp:1300, pat:['rings','volley'] },
+  { name:'NYXHEIM THE COILED',   hp:1560, pat:['spiral','radial'] },
+  { name:'DRAVETH THE CHARGER',  hp:1850, pat:['charge','volley'] },
+  { name:'SOLARETH THE CROSS',   hp:2200, pat:['cross','summon'] },
+  { name:'VORGAAL SOULEATER',    hp:2600, pat:['spiral','rings','volley'] },
 ];
-const EANU = { name:'EANU THE DRAGON KING', hp:7200,
+const EANU = { name:'EANU THE DRAGON KING', hp:5200,
                pat:['radial','sweep','volley','spiral','rings','cross'] };
 
 // Power attack tiers. Unlocked by cumulative dragon-lord kills.
@@ -785,7 +785,7 @@ function drawPad(){
     ctx.beginPath(); ctx.arc(cx, cy, 22, 0, TAU); ctx.stroke();
     ctx.fillStyle = amber(0.24); ctx.font = '11px "Courier New",monospace';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText('MOVE', cx, cy + 84);
+    ctx.fillText('MOVE', cx, cy - 80);
   }
   // FIRE
   const f = PAD.fire;
@@ -1381,6 +1381,7 @@ function clearSave(){
   G.hasSave = false; G.checkpoint = null;
 }
 function startGame(snap){
+  if (!snap) clearSave();            // a new run starts a fresh record
   for (const k in pools) pools[k].clear();
   G.boss = null; G.powerFx = null; G.card = null; G.cardT = 0;
   G.kills = snap ? snap.kills : 0;
@@ -1389,7 +1390,9 @@ function startGame(snap){
   G.level = snap ? snap.level : 1;
   G.lordsKilled = snap ? snap.lordsKilled : 0;
   G.phase = snap ? clamp(snap.phase, 1, PHASES.length) : 1;
-  G.powerTier = snap ? clamp(snap.powerTier, 0, POWER_TIERS.length-1) : 0;
+  G.powerTier = 0;
+  for (let i=0;i<POWER_TIERS.length;i++)          // derive, don't trust a stale save
+    if (G.lordsKilled >= POWER_TIERS[i].at) G.powerTier = i;
   G.powerUses = snap ? (snap.powerUses||0) : 0;
   applyStats(false);
   P.hp = snap ? clamp(snap.hp, 1, P.maxHP) : P.maxHP;
@@ -1402,7 +1405,7 @@ function startGame(snap){
   Audio2.setTrack('triumph', G.phase);
   showCard('PHASE ' + G.phase, PHASES[G.phase-1].name);
   maybeSpawnLord();          // a run resumed on a lord milestone re-summons it
-  saveGame(false);
+  saveGame(!snap);           // a new run's start IS its first checkpoint
 }
 function toggleMute(){
   const on = !(Audio2.opt.music || Audio2.opt.sfx);
