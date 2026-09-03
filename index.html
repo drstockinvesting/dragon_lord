@@ -42,7 +42,7 @@ const CFG = {
 
   FIELD: { top: 92, bottom: 760, left: 26, right: 514 },   // Cindu's flight box
 
-  PLAYER: { maxHP:100, damage:10, fireRate:2.5, speed:275, r:15,
+  PLAYER: { maxHP:100, damage:10, fireRate:2.5, speed:550, r:15,
             bulletSpeed:780, bulletR:5, iframes:0.85 },
 
   LEVEL: { hp:10, dmgMul:1.08, rateMul:1.06 },   // per level-up
@@ -150,6 +150,21 @@ const pick  = arr => arr[(Math.random()*arr.length)|0];
 const dist2 = (ax,ay,bx,by) => { const dx=ax-bx, dy=ay-by; return dx*dx+dy*dy; };
 const hit   = (ax,ay,ar,bx,by,br) => dist2(ax,ay,bx,by) <= (ar+br)*(ar+br);
 const easeOut = t => 1 - (1-t)*(1-t);
+const wrapPi = a => { let d = (a + Math.PI) % TAU; if (d < 0) d += TAU; return d - Math.PI; };
+
+/* Dragons are drawn nose-up, so rotation 0 points along -Y. A heading of
+   (vx,vy) therefore needs atan2(vy,vx) + PI/2 -- straight down comes out at
+   PI, which is exactly how every mob used to be pinned. */
+const headingRot = (vx, vy) => Math.atan2(vy, vx) + Math.PI/2;
+const angTo = (a, b, k) => a + wrapPi(b - a) * k;
+
+/** Turn `o.face` toward the direction it is actually travelling. */
+function faceVelocity(o, vx, vy, dt, turn, limit){
+  if (Math.hypot(vx, vy) < 6) return;          // too slow to read a heading
+  let want = headingRot(vx, vy);
+  if (limit) want = Math.PI + clamp(wrapPi(want - Math.PI), -limit, limit);
+  o.face = angTo(o.face, want, 1 - Math.exp(-(turn || 9) * dt));
+}
 
 function amber(a){ return a >= 1 ? CFG.AMBER : 'rgba(255,176,0,'+a+')'; }
 function purple(a){ return a >= 1 ? CFG.PURPLE : 'rgba(176,38,255,'+a+')'; }
@@ -259,11 +274,31 @@ const Audio2 = (function(){
 
   /* -- sound effects ---------------------------------------------------- */
   const SFX = {
-    fire(rate){
-      // pitch drifts up slightly as Cindu's fire rate grows
+    fire(rate, tier){
+      // Pitch drifts up with Cindu's fire rate; the body of the sound gains a
+      // layer per fire tier, so a level-1 spit and a late-game fireball are
+      // recognisably different shots. Gains stay low because at ~6 shots a
+      // second the tails overlap.
+      const t0 = now();
+      const T = clamp(tier|0, 0, 4);
       const base = 620 + clamp((rate-2.5)*70, 0, 260);
-      tone({type:'square', f0:base, f1:base*0.55, dur:0.075, gain:0.11, slide:'exp'});
-      noise({cut0:2600, cut1:1100, dur:0.05, gain:0.05});
+      tone({type:'square', f0:base, f1:base*0.55, dur:0.075 + T*0.012,
+            gain:0.11, slide:'exp'});
+      noise({cut0:2600, cut1:1100 - T*140, dur:0.05 + T*0.018, gain:0.05 + T*0.010});
+      if (T >= 1)                                    // reedy body under the crack
+        tone({type:'sawtooth', f0:base*0.50, f1:base*0.22, dur:0.10 + T*0.02,
+              gain:0.045 + T*0.012, slide:'exp', filter:'lowpass', cut:1800});
+      if (T >= 2)                                    // the flame roar
+        noise({cut0:900, cut1:220, dur:0.15 + T*0.03, gain:0.045 + T*0.010,
+               filter:'bandpass', q:0.7, t:t0+0.01});
+      if (T >= 3)                                    // sub thump on the launch
+        tone({type:'sawtooth', f0:base*0.26, f1:base*0.12, dur:0.20, gain:0.065,
+              slide:'exp', filter:'lowpass', cut:600, t:t0+0.01});
+      if (T >= 4){                                   // king's breath: bite + tail
+        tone({type:'square', f0:base*1.5, f1:base*0.6, dur:0.09, gain:0.045,
+              slide:'exp', t:t0+0.015});
+        noise({cut0:180, cut1:60, dur:0.26, gain:0.055, filter:'lowpass', t:t0+0.02});
+      }
     },
     power(tier){
       const t0 = now();
@@ -816,7 +851,7 @@ function drawPad(){
 
 /* ============================= GAME STATE =============================== */
 const pools = {
-  pb  : new Pool(() => ({x:0,y:0,vx:0,vy:0,r:5,dmg:0}), CFG.POOL.pBullets),
+  pb  : new Pool(() => ({x:0,y:0,vx:0,vy:0,r:5,dmg:0,tier:0,seed:0}), CFG.POOL.pBullets),
   eb  : new Pool(() => ({x:0,y:0,vx:0,vy:0,r:6,dmg:0,t:0}), CFG.POOL.eBullets),
   en  : new Pool(() => ({}), CFG.POOL.enemies),
   par : new Pool(() => ({x:0,y:0,vx:0,vy:0,life:0,max:1,len:3,pur:false}), CFG.POOL.particles),
@@ -852,6 +887,14 @@ function applyStats(keepRatio){
   if (keepRatio) P.hp = clamp(P.maxHP * ratio, 1, P.maxHP);
 }
 function currentTier(){ return POWER_TIERS[G.powerTier]; }
+
+/* Cindu's breath grows with her damage: 0 is the thin starting bolt, 4 is a
+   full fireball. Thresholds are damage multiples, so the flame keeps pace
+   with the stat rather than with a raw level count. */
+function fireTier(){
+  const g = P.damage / CFG.PLAYER.damage;
+  return g >= 3.2 ? 4 : g >= 2.2 ? 3 : g >= 1.6 ? 2 : g >= 1.25 ? 1 : 0;
+}
 function powerReady(){
   return G.powerTimer >= CFG.POWER.cooldown &&
          P.hp >= P.maxHP * CFG.POWER.hpGate &&
@@ -876,11 +919,15 @@ function showCard(txt, sub){ G.card = { txt, sub }; G.cardT = 2.6; }
 /* ------------------------------ shooting ------------------------------- */
 function playerShoot(){
   const b = pools.pb.alloc(); if (!b) return;
+  const T = fireTier();
   b.x = P.x; b.y = P.y - 22; b.vx = 0; b.vy = -CFG.PLAYER.bulletSpeed;
+  // Hitbox growth is unchanged -- the fireball only *looks* bigger, so the
+  // flame can evolve without quietly rebalancing the game.
   b.r = CFG.PLAYER.bulletR + Math.min(4, (G.level-1)*0.35);
   b.dmg = P.damage;
-  Audio2.SFX.fire(P.fireRate);
-  burst(P.x, P.y-24, 2, 60, true, 3);
+  b.tier = T; b.seed = rnd(TAU);
+  Audio2.SFX.fire(P.fireRate, T);
+  burst(P.x, P.y-24, 2 + T, 60 + T*22, true, 3);
 }
 function enemyShoot(e, ang, spd){
   const b = pools.eb.alloc(); if (!b) return;
@@ -944,6 +991,7 @@ function spawnEnemy(type){
   e.y = -34 - rnd(60);
   e.cool = rnd(3.4, 1.4);
   e.mode = 'incoming'; e.t = rnd(TAU); e.flap = rnd(TAU);
+  e.face = Math.PI;                              // nose-down on entry
   e.orbCx = 0; e.orbCy = 0; e.orbR = 0; e.orbA = 0; e.orbW = 0;
   e.burn = 0; e.hitT = 0; e.burstLeft = 0; e.minion = false;
   e.phaseAt = G.phase;
@@ -968,6 +1016,7 @@ function updateEnemies(dt){
   const a = pools.en.active;
   for (let i = a.length - 1; i >= 0; i--){
     const e = a[i];
+    const fx0 = e.x, fy0 = e.y;                  // for the facing below
     e.t += dt; e.flap += dt * 8; e.hitT = Math.max(0, e.hitT - dt*4);
 
     if (e.burn > 0){                                  // soul-burn damage over time
@@ -1002,6 +1051,10 @@ function updateEnemies(dt){
       e.x = e.orbCx + Math.cos(e.orbA) * e.orbR;
       e.y = e.orbCy + Math.sin(e.orbA) * e.orbR * 0.62;
     }
+
+    // Face wherever it actually ended up moving -- measured from the real
+    // delta, so field clamping and orbit maths are both accounted for.
+    if (dt > 0) faceVelocity(e, (e.x - fx0)/dt, (e.y - fy0)/dt, dt, 9);
 
     // firing
     if (e.y > 10){
@@ -1113,7 +1166,7 @@ function spawnLord(){
     name:def.name, maxHP:def.hp, hp:def.hp, pats:def.pat, isEanu,
     x:CFG.W/2, y:-140, t:0, r:isEanu ? 60 : 44,
     patIdx:0, patT:0, swT:0, fireT:0.8, spiral:0,
-    mode:'enter', dieT:0, hitT:0, flap:0, eanuStage:0,
+    mode:'enter', dieT:0, hitT:0, flap:0, eanuStage:0, face:Math.PI,
   };
   buildBossSprites(G.boss);
   Audio2.SFX.lordSpawn();
@@ -1148,6 +1201,7 @@ function updateBoss(dt){
     return;
   }
 
+  const bfx0 = b.x, bfy0 = b.y;                   // for the facing below
   const list = bossPatternList(b);
   b.patT += dt;
   if (b.patT > (b.isEanu ? 5.2 : 6.6)){ b.patT = 0; b.patIdx = (b.patIdx+1) % list.length; b.fireT = 0.35; }
@@ -1161,6 +1215,10 @@ function updateBoss(dt){
     b.x = CFG.W/2 + Math.sin(b.t * 0.55) * 158;
     b.y = lerp(b.y, 158 + Math.sin(b.t * 0.85) * 36, Math.min(1, 2.2*dt));
   }
+
+  // A lord is far bigger than a mob, so it only banks into its movement --
+  // capped well short of side-on, and it still reads as bearing down on Cindu.
+  if (dt > 0) faceVelocity(b, (b.x - bfx0)/dt, (b.y - bfy0)/dt, dt, 5, 0.55);
 
   // firing
   const spd = 200 * phaseMul('bulletSpeed');
@@ -1305,6 +1363,9 @@ function updateBullets(dt){
   for (let i = pb.length-1; i>=0; i--){
     const b = pb[i];
     b.x += b.vx*dt; b.y += b.vy*dt;
+    // a real fireball sheds embers
+    if (b.tier >= 2 && Math.random() < dt * (7 * (b.tier-1)))
+      burst(b.x + rnd(3,-3), b.y + b.r, 1, 34, Math.random() < 0.4, 3);
     if (b.y < -24 || b.x < -24 || b.x > CFG.W+24){ pools.pb.release(i); continue; }
     let consumed = false;
     const es = pools.en.active;
@@ -1444,7 +1505,7 @@ function drawEnemies(){
   for (let i=0;i<a.length;i++){
     const e = a[i];
     const fr = ((e.flap|0) % 3 + 3) % 3;
-    blit(SPR[e.art][fr], e.x, e.y, Math.PI, e.mode === 'orbiting' ? 0.94 : 1);
+    blit(SPR[e.art][fr], e.x, e.y, e.face, e.mode === 'orbiting' ? 0.94 : 1);
     if (e.burn > 0){
       ctx.strokeStyle = purple(0.35 + 0.25*Math.sin(G.t*24)); ctx.lineWidth = 1.6;
       ctx.beginPath(); ctx.arc(e.x, e.y, e.r + 6, 0, TAU); ctx.stroke();
@@ -1472,7 +1533,7 @@ function drawBoss(){
   const fr = ((b.flap|0) % 3 + 3) % 3;
   const dyingScale = b.mode === 'dying' ? 1 + b.dieT*0.14 : 1;
   const alpha = b.mode === 'dying' ? clamp(1 - b.dieT/2.1, 0, 1) : 1;
-  blit(b.spr[fr], b.x, b.y, Math.PI, alpha, dyingScale);
+  blit(b.spr[fr], b.x, b.y, b.face, alpha, dyingScale);
   if (b.hitT > 0){
     ctx.strokeStyle = purple(b.hitT*0.85); ctx.lineWidth = 3;
     ctx.beginPath(); ctx.arc(b.x, b.y, b.r + 8, 0, TAU); ctx.stroke();
@@ -1492,15 +1553,82 @@ function drawPlayer(){
     blit(SPR.core, P.x, P.y, 0, pulse);
   }
 }
-function drawBullets(){
-  const pb = pools.pb.active;
-  for (let i=0;i<pb.length;i++){
-    const b = pb[i];
+/* Cindu's breath by tier: 0 a thin bolt, 4 a roaring fireball. Everything
+   stays stroke-and-glow so it sits inside the game's neon look. */
+function drawFlame(b){
+  const T = b.tier | 0;
+  const f = Math.sin(b.seed + G.t * 34);            // flicker, per bullet
+  const R = b.r * (1 + T * 0.34) * (1 + f * 0.05);  // visual radius only
+
+  if (T === 0){                                     // the original bolt
     ctx.strokeStyle = CFG.AMBER; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.moveTo(b.x, b.y - b.r*2.1); ctx.lineTo(b.x, b.y + b.r*1.5); ctx.stroke();
     ctx.strokeStyle = purple(0.85); ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(b.x, b.y - b.r*1.1); ctx.lineTo(b.x, b.y + b.r*0.7); ctx.stroke();
+    return;
   }
+
+  ctx.save();
+  ctx.translate(b.x, b.y);
+  ctx.shadowColor = CFG.AMBER; ctx.shadowBlur = 5 + T * 5;
+
+  // Roundness rises with the tier: a lean teardrop becomes a ball of fire.
+  const q = T / 4;
+  const nose = R * lerp(1.70, 1.05, q);        // how far the point leads
+  const bulge = R * lerp(0.92, 1.42, q);       // how fat the sides are
+  const back = R * lerp(1.15, 1.30, q);
+
+  // tail: wisps of flame torn off the back, shorter as the head grows fatter
+  const tail = back + R * lerp(1.5, 0.9, q);
+  ctx.strokeStyle = amber(0.45 + T*0.07); ctx.lineWidth = 1 + T*0.3;
+  for (let k = -1; k <= 1; k += 2){
+    ctx.beginPath();
+    ctx.moveTo(k * bulge * 0.5, back * 0.75);
+    ctx.quadraticCurveTo(k * bulge * (0.75 + f*0.22), tail * 0.9, k * R * 0.12, tail);
+    ctx.stroke();
+  }
+
+  // Each half is one cubic. At q=1 the handles sit at 4/3 of the radius,
+  // which is the standard cubic approximation of a semicircle -- so the
+  // teardrop's point rounds off into a ball as Cindu's damage climbs.
+  const cx1 = bulge * lerp(1.15, 1.33, q), cy1 = -nose * lerp(0.42, 1.00, q);
+  const cx2 = bulge * lerp(1.00, 1.33, q), cy2 =  back * lerp(0.72, 1.00, q);
+  ctx.strokeStyle = CFG.AMBER; ctx.lineWidth = 1.6 + T * 0.3;
+  ctx.beginPath();
+  ctx.moveTo(0, -nose);
+  ctx.bezierCurveTo( cx1, cy1,  cx2, cy2, 0, back);
+  ctx.bezierCurveTo(-cx2, cy2, -cx1, cy1, 0, -nose);
+  ctx.stroke();
+
+  // corona: only once the flame is genuinely a fireball
+  if (T >= 3){
+    ctx.strokeStyle = amber(0.30 + 0.12*f);
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(0, 0, bulge * (1.35 + 0.07*f), 0, TAU); ctx.stroke();
+  }
+  if (T >= 4){
+    ctx.strokeStyle = amber(0.16);
+    ctx.beginPath(); ctx.arc(0, 0, bulge * (1.72 - 0.09*f), 0, TAU); ctx.stroke();
+    for (let k = 0; k < 5; k++){                    // jagged licks off the ball
+      const a = b.seed + k * TAU/5 + G.t * 2.2;
+      const r0 = bulge * 1.05, r1 = bulge * (1.5 + 0.33*Math.sin(b.seed + k*2.1 + G.t*17));
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(a)*r0, Math.sin(a)*r0);
+      ctx.lineTo(Math.cos(a)*r1, Math.sin(a)*r1);
+      ctx.stroke();
+    }
+  }
+
+  // soul-core: the hot purple centre, brighter the stronger Cindu gets
+  ctx.shadowColor = CFG.PURPLE; ctx.shadowBlur = 4 + T * 4;
+  ctx.strokeStyle = purple(0.6 + T * 0.09);
+  ctx.lineWidth = 1 + T * 0.4;
+  ctx.beginPath(); ctx.arc(0, 0, R * (0.38 + 0.05*f), 0, TAU); ctx.stroke();
+  ctx.restore();
+}
+function drawBullets(){
+  const pb = pools.pb.active;
+  for (let i=0;i<pb.length;i++) drawFlame(pb[i]);
   const eb = pools.eb.active;
   ctx.lineWidth = 1.6;
   for (let i=0;i<eb.length;i++){
@@ -1899,6 +2027,7 @@ window.__CINDU = {
     updatePowerTier(); applyStats(false); P.hp = P.maxHP;
   },
   summon: spawnLord,
+  spawn: spawnEnemy, ARCHETYPES, fireTier,
   power(){ G.powerTimer = CFG.POWER.cooldown; P.hp = P.maxHP; firePower(); },
   stats(){ return { state:G.state, kills:G.kills, level:G.level, phase:G.phase,
                     lords:G.lordsKilled, tier:G.powerTier, hp:P.hp, maxHP:P.maxHP,
