@@ -42,8 +42,8 @@ const CFG = {
 
   FIELD: { top: 92, bottom: 760, left: 26, right: 514 },   // Cindu's flight box
 
-  PLAYER: { maxHP:100, damage:10, fireRate:2.5, speed:550, r:15,
-            bulletSpeed:780, bulletR:5, iframes:0.85 },
+  PLAYER: { maxHP:100, damage:10, fireRate:2.5, speed:400, r:15,
+            bulletSpeed:780, bulletR:5, iframes:0.85, hitSlop:2 },
 
   LEVEL: { hp:10, dmgMul:1.08, rateMul:1.06 },   // per level-up
 
@@ -66,7 +66,7 @@ const CFG = {
   ORBIT_FIRE_MUL: 0.6,    // circlers are worn down and fire slower
   POWER: { cooldown:30, hpGate:0.5 },
 
-  POOL: { pBullets:220, eBullets:420, enemies:48, particles:700, floaters:24 },
+  POOL: { pBullets:220, eBullets:420, enemies:48, particles:700, floaters:24, rings:16 },
 
   SAVE_KEY: 'cindu_dragon_lord_save_v1',
   OPT_KEY:  'cindu_dragon_lord_opts_v1',
@@ -343,10 +343,33 @@ const Audio2 = (function(){
       [69,73,76,81].forEach((m,i)=>
         tone({type:'triangle', f0:mtof(m), dur:0.30, gain:0.16, t:t0+i*0.075}));
     },
-    shard(){ tone({type:'triangle', f0:1180, f1:1760, dur:0.06, gain:0.045, slide:'exp'}); },
+    /* A whole level is a hundred dragons. It gets its own fanfare: the
+       level-up arpeggio carried a fifth higher over a rising swell, so
+       `levelUp` above stays the smaller cue for POWER EVOLVED. */
+    ascend(){
+      const t0 = now();
+      [69,73,76,81,88].forEach((m,i)=>
+        tone({type:'triangle', f0:mtof(m), dur:0.42, gain:0.17, t:t0+i*0.08}));
+      [57,64].forEach(m => tone({type:'square', f0:mtof(m), dur:0.9, gain:0.075,
+                                 t:t0+0.10, filter:'lowpass', cut:1800}));
+      tone({type:'sawtooth', f0:mtof(33), f1:mtof(45), dur:1.1, gain:0.11, t:t0,
+            slide:'exp', filter:'lowpass', cut:1200});
+      noise({cut0:300, cut1:6000, dur:0.75, gain:0.075, filter:'bandpass', q:0.7, t:t0});
+    },
+    /* `n` is the shard count after the pickup, 1..10. The pitch climbs across
+       the ten, so the tenth blip audibly leans into the soul it completes. */
+    shard(n){
+      const f0 = 1000 + (((n || 1) - 1) % 10) * 78;
+      tone({type:'triangle', f0, f1:f0*1.5, dur:0.06, gain:0.055, slide:'exp'});
+    },
+    /* A soul is ten shards -- it gets a body under the two notes: a third at
+       the octave, a low swell and a short breath of noise. */
     soul(){
       const t0 = now();
-      [76,83].forEach((m,i)=> tone({type:'triangle', f0:mtof(m), dur:0.22, gain:0.10, t:t0+i*0.06}));
+      [76,83,88].forEach((m,i)=> tone({type:'triangle', f0:mtof(m), dur:0.26, gain:0.13, t:t0+i*0.055}));
+      tone({type:'sawtooth', f0:mtof(38), f1:mtof(45), dur:0.60, gain:0.075, t:t0,
+            slide:'exp', filter:'lowpass', cut:900});
+      noise({cut0:500, cut1:4200, dur:0.34, gain:0.055, filter:'bandpass', q:0.9, t:t0});
     },
     select(){
       const t0 = now();
@@ -851,11 +874,12 @@ function drawPad(){
 
 /* ============================= GAME STATE =============================== */
 const pools = {
-  pb  : new Pool(() => ({x:0,y:0,vx:0,vy:0,r:5,dmg:0,tier:0,seed:0}), CFG.POOL.pBullets),
+  pb  : new Pool(() => ({x:0,y:0,vx:0,vy:0,r:5,hr:5,dmg:0,tier:0,seed:0}), CFG.POOL.pBullets),
   eb  : new Pool(() => ({x:0,y:0,vx:0,vy:0,r:6,dmg:0,t:0}), CFG.POOL.eBullets),
   en  : new Pool(() => ({}), CFG.POOL.enemies),
   par : new Pool(() => ({x:0,y:0,vx:0,vy:0,life:0,max:1,len:3,pur:false}), CFG.POOL.particles),
   flo : new Pool(() => ({x:0,y:0,t:0,txt:'',pur:false}), CFG.POOL.floaters),
+  rng : new Pool(() => ({x:0,y:0,t:0,dur:1,r0:0,r1:0,pur:false,w:2}), CFG.POOL.rings),
 };
 
 const P = { x:CFG.W/2, y:CFG.FIELD.bottom-70, hp:100, maxHP:100, damage:10,
@@ -870,6 +894,7 @@ const G = {
   boss:null, bossIntro:0, bossWin:0,
   powerTimer:CFG.POWER.cooldown, powerFx:null,
   shake:0, flash:0, card:null, cardT:0,
+  shardPulse:0, soulPulse:0, healFlash:0, levelFx:null,
   hasSave:false, checkpoint:null,
   menuIdx:0, storyT:0, endT:0,
   frameMs:0,
@@ -914,6 +939,11 @@ function floater(x, y, txt, pur){
   const f = pools.flo.alloc(); if (!f) return;
   f.x=x; f.y=y; f.t=0; f.txt=txt; f.pur=!!pur;
 }
+/** An expanding stroked ring. The shockwave the reward chain was missing. */
+function ring(x, y, r0, r1, dur, pur, w){
+  const g = pools.rng.alloc(); if (!g) return;
+  g.x=x; g.y=y; g.t=0; g.dur=dur; g.r0=r0; g.r1=r1; g.pur=!!pur; g.w=w || 2;
+}
 function showCard(txt, sub){ G.card = { txt, sub }; G.cardT = 2.6; }
 
 /* ------------------------------ shooting ------------------------------- */
@@ -921,9 +951,11 @@ function playerShoot(){
   const b = pools.pb.alloc(); if (!b) return;
   const T = fireTier();
   b.x = P.x; b.y = P.y - 22; b.vx = 0; b.vy = -CFG.PLAYER.bulletSpeed;
-  // Hitbox growth is unchanged -- the fireball only *looks* bigger, so the
-  // flame can evolve without quietly rebalancing the game.
   b.r = CFG.PLAYER.bulletR + Math.min(4, (G.level-1)*0.35);
+  // The drawn flame is b.r * (1 + T*0.34). The hitbox follows at half that
+  // rate, so a hit always lands inside the fire the player can see -- never
+  // outside it -- while a late-game fireball still connects like one.
+  b.hr = b.r * (1 + T * 0.17) + CFG.PLAYER.hitSlop;
   b.dmg = P.damage;
   b.tier = T; b.seed = rnd(TAU);
   Audio2.SFX.fire(P.fireRate, T);
@@ -1103,29 +1135,52 @@ function damageEnemy(e, i, amount, burnFor){
    1 shard per minor dragon -> 10 shards = 1 soul -> 10 souls = 1 level-up.
    A dragon lord is worth one whole soul.
    ======================================================================== */
+/* The three rewards are deliberately three sizes. A shard fires once per kill,
+   so it stays a blip and a counter tick -- no shake, no flash, or a long run
+   would be unreadable. A soul is ten of those and gets a ring, a flash and a
+   nudge of shake. A level is a hundred and takes the screen. */
 function addShards(n){
   G.shards += n;
-  Audio2.SFX.shard();
+  Audio2.SFX.shard(G.shards);
+  G.shardPulse = 1;
+  burst(P.x, P.y - 20, 3, 95, true, 4);
   while (G.shards >= CFG.SHARDS_PER_SOUL){ G.shards -= CFG.SHARDS_PER_SOUL; addSouls(1); }
 }
 function addSouls(n){
   for (let i=0;i<n;i++){
     G.souls++;
     Audio2.SFX.soul();
+    G.soulPulse = 1;
     floater(P.x, P.y - 44, 'FIRE SOUL', true);
+    ring(P.x, P.y, 16, 135, 0.5, true, 2.5);
+    burst(P.x, P.y, 30, 250, true, 7);
+    burst(P.x, P.y, 12, 150, false, 5);
+    G.shake = Math.max(G.shake, 8);
+    G.flash = Math.max(G.flash, 0.32);
     if (G.souls >= CFG.SOULS_PER_LEVEL){ G.souls -= CFG.SOULS_PER_LEVEL; levelUp(); }
   }
 }
 function levelUp(){
-  const prevMax = P.maxHP;
+  const hpBefore = P.hp;
   G.level++;
   applyStats(false);
-  P.hp = Math.min(P.maxHP, P.hp + (P.maxHP - prevMax));   // heal by the HP gained
-  Audio2.SFX.levelUp();
-  floater(P.x, P.y - 68, 'LEVEL ' + G.level, false);
-  showCard('SOUL RESTORED', 'LEVEL ' + G.level + '  -  DMG / RATE / VITALITY UP');
-  G.flash = 0.55;
-  burst(P.x, P.y, 26, 200, true, 6);
+  P.hp = P.maxHP;                       // the card says SOUL RESTORED -- restore it
+  const healed = P.maxHP - hpBefore;
+  Audio2.SFX.ascend();
+  floater(P.x, P.y - 96, 'LEVEL ' + G.level, false);
+  if (healed > 1) floater(P.x, P.y - 124, '+' + Math.ceil(healed) + ' HP', true);
+  showCard('SOUL RESTORED', 'LEVEL ' + G.level + '  -  FULL HP / DMG / RATE');
+  G.flash = 0.9;
+  G.shake = Math.max(G.shake, 15);
+  G.healFlash = 1;
+  G.levelFx = { t:0, dur:0.9 };
+  // Three rings at once, staggered by reach and duration, read as a cascade
+  // without needing a scheduler.
+  ring(P.x, P.y, 18, 150, 0.45, true,  3);
+  ring(P.x, P.y, 18, 230, 0.70, false, 2.5);
+  ring(P.x, P.y, 18, 320, 0.95, true,  2);
+  burst(P.x, P.y, 46, 300, true, 8);
+  burst(P.x, P.y, 30, 190, false, 6);
 }
 function updatePowerTier(){
   let t = 0;
@@ -1371,7 +1426,7 @@ function updateBullets(dt){
     const es = pools.en.active;
     for (let j = es.length-1; j>=0; j--){
       const e = es[j];
-      if (hit(b.x, b.y, b.r, e.x, e.y, e.r)){
+      if (hit(b.x, b.y, b.hr, e.x, e.y, e.r)){
         burst(b.x, b.y, 4, 110, false, 3);
         damageEnemy(e, j, b.dmg);
         pools.pb.release(i); consumed = true; break;
@@ -1379,7 +1434,7 @@ function updateBullets(dt){
     }
     if (consumed) continue;
     const bs = G.boss;
-    if (bs && bs.mode === 'fight' && hit(b.x, b.y, b.r, bs.x, bs.y, bs.r)){
+    if (bs && bs.mode === 'fight' && hit(b.x, b.y, b.hr, bs.x, bs.y, bs.r)){
       burst(b.x, b.y, 5, 130, false, 3);
       damageBoss(b.dmg);
       pools.pb.release(i);
@@ -1414,8 +1469,21 @@ function updateFx(dt){
     f.t += dt; f.y -= 34*dt;
     if (f.t > 1.1) pools.flo.release(i);
   }
+  const gs = pools.rng.active;
+  for (let i = gs.length-1; i>=0; i--){
+    const g = gs[i];
+    g.t += dt;
+    if (g.t >= g.dur) pools.rng.release(i);
+  }
+  if (G.levelFx){
+    G.levelFx.t += dt;
+    if (G.levelFx.t >= G.levelFx.dur) G.levelFx = null;
+  }
   G.shake = Math.max(0, G.shake - dt*34);
   G.flash = Math.max(0, G.flash - dt*2.4);
+  G.shardPulse = Math.max(0, G.shardPulse - dt*3.6);
+  G.soulPulse  = Math.max(0, G.soulPulse  - dt*2.2);
+  G.healFlash  = Math.max(0, G.healFlash  - dt*1.8);
   if (G.cardT > 0) G.cardT -= dt; else G.card = null;
 }
 
@@ -1461,6 +1529,7 @@ function startGame(snap){
   P.cool = 0; P.hurtFlash = 0;
   G.powerTimer = CFG.POWER.cooldown;
   G.spawnTimer = 2.4; G.shake = 0; G.flash = 0; G.endT = 0;
+  G.shardPulse = 0; G.soulPulse = 0; G.healFlash = 0; G.levelFx = null;
   IN.powerEdge = false; IN.pauseEdge = false; IN.tap = null; IN.power = false;
   G.state = 'playing';
   Audio2.setTrack('triumph', G.phase);
@@ -1552,6 +1621,12 @@ function drawPlayer(){
     const pulse = 0.35 + 0.3*Math.sin(G.t*5);
     blit(SPR.core, P.x, P.y, 0, pulse);
   }
+  // SPR.core was built for the level-up flash and until now only ever drew the
+  // power-ready pulse. On a level it blows off Cindu and fades.
+  if (G.levelFx){
+    const k = clamp(G.levelFx.t / G.levelFx.dur, 0, 1);
+    blit(SPR.core, P.x, P.y, 0, (1-k)*0.9, 1 + easeOut(k)*4.5);
+  }
 }
 /* Cindu's breath by tier: 0 a thin bolt, 4 a roaring fireball. Everything
    stays stroke-and-glow so it sits inside the game's neon look. */
@@ -1640,6 +1715,16 @@ function drawBullets(){
   }
 }
 function drawParticles(){
+  const gs = pools.rng.active;
+  for (let i=0;i<gs.length;i++){
+    const g = gs[i];
+    const k = clamp(g.t / g.dur, 0, 1), a = 1 - k;
+    ctx.strokeStyle = g.pur ? purple(a*0.9) : amber(a*0.85);
+    ctx.lineWidth = g.w * (0.4 + a*0.6);
+    ctx.beginPath();
+    ctx.arc(g.x, g.y, lerp(g.r0, g.r1, easeOut(k)), 0, TAU);
+    ctx.stroke();
+  }
   const ps = pools.par.active;
   for (let i=0;i<ps.length;i++){
     const p = ps[i];
@@ -1718,12 +1803,22 @@ function drawHUD(){
   const hpFrac = P.hp / P.maxHP;
   txt('HP', 14, 18, 12, amber(0.7), 'left');
   bar(38, 11, 176, 15, hpFrac, hpFrac > CFG.POWER.hpGate ? CFG.AMBER : CFG.PURPLE);
+  if (G.healFlash > 0.01){                       // the bar snapping to full, made legible
+    ctx.fillStyle = purple(G.healFlash * 0.75);
+    ctx.fillRect(39.5, 12.5, 173 * hpFrac, 12);
+    ctx.strokeStyle = purple(G.healFlash); ctx.lineWidth = 1.6;
+    ctx.strokeRect(38, 11, 176, 15);
+  }
   txt(Math.ceil(P.hp) + '/' + P.maxHP, 222, 18, 11, amber(0.65), 'left');
   txt('PH ' + G.phase + '/' + PHASES.length + '   LV ' + G.level,
       CFG.W-14, 18, 13, CFG.AMBER, 'right', 'bold ');
   // counters
   txt('DRAGONS ' + String(G.kills).padStart(4,'0') + '/' + CFG.TOTAL_KILLS, 14, 40, 12, amber(0.85), 'left');
-  txt('SHARD ' + G.shards + '/10   SOUL ' + G.souls + '/10', CFG.W-14, 40, 12, purple(0.95), 'right');
+  // Split so a shard tick and a soul tick can pulse independently.
+  const sp = G.shardPulse, sl = G.soulPulse;
+  txt('SOUL ' + G.souls + '/10', CFG.W-14, 40, 12 + 3*sl, purple(0.95), 'right', sl > 0.05 ? 'bold ' : '');
+  txt('SHARD ' + G.shards + '/10', CFG.W-116, 40, 12 + 2.5*sp, purple(0.72 + 0.28*sp), 'right',
+      sp > 0.05 ? 'bold ' : '');
   // power readiness: two separate lights, so a denied press is never a mystery
   const cd = clamp(G.powerTimer / CFG.POWER.cooldown, 0, 1);
   const hpOK = P.hp >= P.maxHP * CFG.POWER.hpGate;

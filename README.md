@@ -50,6 +50,11 @@ Kill minor dragons. Every kill drops **1 fire soul shard**.
 10 souls   =  1 stat upgrade  (+10 max HP, +8% damage, +6% fire rate)
 ```
 
+The three rewards are deliberately three sizes. A shard fires on every kill, so it stays
+a rising blip and a pulse on the HUD counter. A soul is ten of those and earns a ring, a
+flash and a nudge of screen shake. A level is a hundred, takes the screen, and **restores
+Cindu to full health** — the card says SOUL RESTORED, so it restores her.
+
 A **dragon lord** appears every 100 minor dragons killed — nine of them — and each
 is worth a whole fire soul. After 1000 minor dragons, **Eanu the Dragon King**
 arrives for the final fight.
@@ -138,6 +143,11 @@ main loop.
 `ARCHETYPES`, `PHASES`, `LORDS`, `EANU` and `POWER_TIERS` tables directly beneath
 it. Tuning the game should not require touching any logic.
 
+Thinking about replacing the vector art or the chiptune with generated assets? Read
+[`docs/AI-ASSETS.md`](docs/AI-ASSETS.md) for the tools and
+[`docs/ASSET-PIPELINE.md`](docs/ASSET-PIPELINE.md) for what the code would have to
+change — which is the larger half of the job.
+
 Technical notes worth knowing before editing:
 
 - The virtual resolution is a fixed 540×960, scaled to fit with letterboxing, so
@@ -151,5 +161,8 @@ Technical notes worth knowing before editing:
   tab cannot spiral.
 - Music is scheduled with a lookahead against `AudioContext.currentTime`; firing
   notes straight off `setTimeout` drifts audibly.
+- Cindu's fireball has two radii: `b.r` drives the drawing and `b.hr` drives
+  collision. `hr` tracks the visible flame at half its growth rate, so a hit always
+  lands inside the fire you can see and never outside it.
 - `window.__CINDU` exposes a debug hook (`jump`, `summon`, `power`, `stats`) used
   by the automated playtests.
