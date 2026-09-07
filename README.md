@@ -5,6 +5,9 @@ no downloaded assets. Plays on a phone and on a desktop keyboard.
 
 **Play it:** open `index.html` in any modern browser.
 
+**Where next:** see [ROADMAP.md](ROADMAP.md) for the six-stage development plan,
+including every step that needs a tool outside this repository.
+
 ---
 
 ## The tale
