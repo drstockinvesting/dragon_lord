@@ -115,6 +115,67 @@ Souleater. Each also has an attack pattern (`radial`, `sweep`, `summon`, `volley
 `rings`, `spiral`, `charge`, `cross`) in the `LORDS` table. Feed the name *and* the
 pattern into the prompt so the silhouette telegraphs the fight.
 
+### The backdrop — already wired, drop your image in
+
+**This one is built and waiting for art.** The game now renders a three-layer parallax
+backdrop of ruined citadel spires. The tile currently shipping is a procedural placeholder;
+replacing it with a generated image is one command and no code change:
+
+```
+# put your PNG at assets/backdrop.png, then:
+node tools/inline-backdrop.mjs assets/backdrop.png
+```
+
+That base64-inlines it into `index.html`, so the game stays one double-clickable file.
+`assets/backdrop.png` is the editable master; the inlined blob is the build output.
+
+**Hard requirements for the replacement.** Get these wrong and it will look broken:
+
+| | |
+|---|---|
+| Size | 540×960 portrait (matches the virtual resolution) |
+| Budget | **≤150KB PNG.** The tool warns above this. It's a dim silhouette — it doesn't need detail. |
+| Top edge | **The top ~25% must be empty black.** |
+| Bottom edge | **Must fade to black over the last ~190px.** |
+| Brightness | Very dark. The code caps it at `CFG.SKY.maxAlpha`, but a bright image will still look wrong. |
+
+The edge rules are the important ones and they're not stylistic. The tile scrolls upward
+forever and wraps, so **both edges have to meet in nothing** or a hard horizontal line
+sweeps down the screen every 15 seconds. Fading only the top isn't enough — that leaves the
+towers sliced off at their bases with empty sky underneath, which reads as floating rubble.
+Both edges, every time.
+
+The upside: because the tile is meant to sit on pure black, **Gemini's missing alpha channel
+is a non-issue here.** Generate straight onto a black background and use it as-is. No green
+screen, no difference matting. This is the easiest possible asset to hand this model.
+
+#### The prompt
+
+```
+A distant ruined citadel of broken stone spires, drawn as glowing neon vector line art.
+Portrait orientation, 540x960.
+
+Style: stroke-only rendering — thin outlines and interior lines, NO solid fills,
+NO shading, NO gradients, NO texture. Like a glowing CRT vector display.
+Palette: amber #FFB000 for all outlines. Purple #B026FF used ONLY as tiny sparse
+accents — a single lit window slit here and there. Pure black #000000 everywhere else.
+
+Subject: collapsed towers of varying heights, snapped-off crowns with jagged broken
+tops, shattered arches and fallen buttresses, a few intact crenellations. Three
+receding depths: small faint towers far back, medium towers, and large towers in front.
+No characters, no dragons, no creatures, no foreground detail, no ground plane.
+
+CRITICAL COMPOSITION: the top 25% of the image must be completely empty pure black sky
+with nothing in it. The towers must fade out into black at the very bottom edge too.
+The ruin occupies only the middle band of the image.
+
+Very dark and low contrast overall — this is a distant silhouette seen at night, not a
+focal subject. Dim, receding, atmospheric.
+```
+
+Generate a few and pick the one with the cleanest empty top band. If the top isn't empty
+enough, it's faster to paint it black in any editor than to reroll.
+
 ### Effects and landscape — think twice
 
 Effects (particles, rings, the power attack) are the worst fit for generated raster art.
@@ -122,10 +183,9 @@ They're procedural, they scale and fade per-frame, and they're currently ~15 lin
 canvas code each. A sprite sheet would be larger, less flexible, and worse. **Keep the
 effects procedural.**
 
-Landscape/background is the opposite — the current backdrop is 64 wind streaks, and a
-generated parallax layer would be a real improvement and is the *easiest* thing to add
-technically (one image, one draw call, no alpha problem, no animation frames). If you
-want the biggest visual win for the least work, do the background before the sprites.
+Landscape/background was the opposite, and it's **done** — see the backdrop section above.
+It confirmed the prediction: one image, four draw calls, no alpha problem, no animation
+frames, and no measurable frame cost. Do the rest of the landscape work the same way.
 
 ---
 

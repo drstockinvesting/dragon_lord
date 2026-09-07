@@ -1,7 +1,7 @@
 # Cindu: Dragon Lord
 
-A vertical-scrolling dragon shooter. One HTML file, no dependencies, no build step,
-no downloaded assets. Plays on a phone and on a desktop keyboard.
+A vertical-scrolling dragon shooter. One HTML file, no dependencies, nothing downloaded
+at runtime. Plays on a phone and on a desktop keyboard.
 
 **Play it:** open `index.html` in any modern browser.
 
@@ -123,7 +123,14 @@ you back to the last dragon-lord checkpoint, not to zero.
 ## Look and sound
 
 Three colours only: black background, amber outlines, purple effects. Every dragon
-is a stroked vector path — no sprites, no images.
+is a stroked vector path.
+
+Behind them, a three-layer parallax backdrop of ruined citadel spires — the throne Eanu
+took — drifts past: two spire layers off one image plus the wind streaks in front. The
+image is base64-inlined, so it is still one file you can double-click. `assets/backdrop.png`
+is the editable master; swap the art with
+`node tools/inline-backdrop.mjs assets/backdrop.png` and see
+[`docs/AI-ASSETS.md`](docs/AI-ASSETS.md) for what a replacement tile has to satisfy.
 
 All audio is synthesised at runtime with Web Audio oscillators and filtered noise:
 a driving major-key loop for regular waves, a minor-key tritone drone for boss
@@ -164,5 +171,7 @@ Technical notes worth knowing before editing:
 - Cindu's fireball has two radii: `b.r` drives the drawing and `b.hr` drives
   collision. `hr` tracks the visible flame at half its growth rate, so a hit always
   lands inside the fire you can see and never outside it.
+- The backdrop tile scrolls and wraps forever, so it fades to nothing at **both** its top
+  and bottom edges. Fading only one leaves towers sliced off against black.
 - `window.__CINDU` exposes a debug hook (`jump`, `summon`, `power`, `stats`) used
   by the automated playtests.
