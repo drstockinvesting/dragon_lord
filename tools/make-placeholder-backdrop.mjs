@@ -4,7 +4,7 @@
  * today; the intent is to replace it with a generated image. See
  * docs/AI-ASSETS.md for the prompt, then:
  *
- *     node tools/inline-backdrop.mjs assets/backdrop.png
+ *     node tools/inline-asset.mjs BACKDROP assets/backdrop.png
  *
  * Run this with:  node tools/make-placeholder-backdrop.mjs
  *

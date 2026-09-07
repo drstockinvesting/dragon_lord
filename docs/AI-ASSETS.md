@@ -123,7 +123,7 @@ replacing it with a generated image is one command and no code change:
 
 ```
 # put your PNG at assets/backdrop.png, then:
-node tools/inline-backdrop.mjs assets/backdrop.png
+node tools/inline-asset.mjs BACKDROP assets/backdrop.png
 ```
 
 That base64-inlines it into `index.html`, so the game stays one double-clickable file.
@@ -176,6 +176,92 @@ focal subject. Dim, receding, atmospheric.
 Generate a few and pick the one with the cleanest empty top band. If the top isn't empty
 enough, it's faster to paint it black in any editor than to reroll.
 
+### Cindu — start here
+
+**Generate Cindu first, before the bosses.** I said the opposite earlier and it was wrong.
+She is the sprite you look at most, so she is the one that defines the style — and Nano
+Banana is markedly better at variation-from-reference than at generation-from-scratch, so
+a finished Cindu becomes the reference image you hand it for all ten bosses. Getting her
+right first makes the rest consistent almost for free.
+
+She is inlined, not loaded from `assets/`, because she is on screen every frame — a
+couple of frames of vector Cindu at every game start would be the most visible flicker in
+the game. Three frames go in with one command:
+
+```
+node tools/inline-asset.mjs CINDU assets/cindu-0.png assets/cindu-1.png assets/cindu-2.png
+```
+
+To go back to the vector dragon: `node tools/inline-asset.mjs CINDU --clear`.
+
+`assets/cindu-0.png`, `-1` and `-2` currently hold **vector renders**, committed as a
+format and ordering reference. They are deliberately *not* inlined — they look identical
+to what the code already draws, so shipping them would add ~440KB for zero visual change.
+Replace them, then run the command above.
+
+#### Three frames, not one
+
+The bosses take a single image because ten of them times three frames was thirty images.
+Cindu is one character, and she flies constantly — a still image with a bob would read as
+pinned to the screen. So she keeps the game's three-frame convention.
+
+**The frame order is not optional.** `dragonPath`'s flap phases are `[0.15, 0.55, 0.95]`
+and wingspan *grows* with the phase:
+
+| File | Wings |
+|---|---|
+| `cindu-0.png` | drawn in, close to the body |
+| `cindu-1.png` | mid sweep |
+| `cindu-2.png` | fully spread |
+
+The cycle runs 0 → 1 → 2 → 0, so frame 2 snaps back to frame 0. Get the order wrong and
+the flap runs backwards.
+
+**Generate the mid frame first as the master**, then use edit-from-reference for the other
+two — "the same dragon, wings drawn in toward the body" and "the same dragon, wings fully
+spread". Generating three independently guarantees drift in the body, and drift shows up
+as a jitter at roughly 2.5 flaps a second, which is impossible to miss.
+
+#### Size and alpha
+
+**512×512 source.** Her display box is 174px, but the victory screen blits her at 1.8× and
+device pixel ratio is capped at 2, so she reaches ~626 device pixels there. 512 is crisp in
+gameplay, marginally soft at that one spot, and keeps three frames affordable. Budget is
+120KB per frame; the tool warns above it.
+
+She draws over the game world, so she needs a **real alpha channel** — same white/black
+pair and same `tools/matte.mjs` workflow as the bosses. Six generations total (three
+frames × two backgrounds).
+
+#### The prompt
+
+```
+A noble dragon king in flight, drawn as glowing neon vector line art.
+Square image, centred, full body in frame with generous margin.
+
+Style: stroke-only rendering — outlines and thin interior lines, NO solid fills,
+NO shading, NO gradients, NO texture. Soft outer bloom on every stroke, like a
+glowing CRT vector display.
+Palette: amber #FFB000 for the body outline and wings. Purple #B026FF for the
+eyes and a bright soul-core at the chest.
+
+Pose: seen from directly above, NOSE POINTING UP toward the top of the frame,
+perfectly symmetrical left-to-right, wings spread to both sides, tail trailing
+straight down. A small crown or horns at the head.
+Wings at a mid sweep, halfway between folded and fully spread.
+
+The whole creature and its glow must sit inside the frame with margin on all
+sides — nothing clipped, especially the wingtips.
+
+Background: solid pure white #FFFFFF.
+```
+
+Then the same prompt with `Background: solid pure black #000000.` and matte the pair.
+
+Two things worth stressing to the model: **top-down view** (she is seen from above, not in
+profile — this is a vertical shooter) and **left-right symmetry**. An asymmetric Cindu will
+look wrong the moment she banks.
+
 ### The bosses — also wired, drop your images in
 
 Like the backdrop, this is built and waiting for art. Unlike the backdrop, the
@@ -223,6 +309,10 @@ had the same background) or if very little soft edge was recovered (usually mean
 the two generations drifted into different images).
 
 #### The base prompt
+
+**Do Cindu first and pass her in as a reference image** — "match the style of this image
+exactly" gets you a consistent set far more reliably than ten independent generations from
+the same text.
 
 ```
 A [BOSS DESCRIPTION], drawn as glowing neon vector line art.

@@ -129,7 +129,7 @@ Behind them, a three-layer parallax backdrop of ruined citadel spires — the th
 took — drifts past: two spire layers off one image plus the wind streaks in front. The
 image is base64-inlined, so it is still one file you can double-click. `assets/backdrop.png`
 is the editable master; swap the art with
-`node tools/inline-backdrop.mjs assets/backdrop.png` and see
+`node tools/inline-asset.mjs BACKDROP assets/backdrop.png` and see
 [`docs/AI-ASSETS.md`](docs/AI-ASSETS.md) for what a replacement tile has to satisfy.
 
 All audio is synthesised at runtime with Web Audio oscillators and filtered noise:
@@ -173,8 +173,16 @@ Technical notes worth knowing before editing:
   lands inside the fire you can see and never outside it.
 - The backdrop tile scrolls and wraps forever, so it fades to nothing at **both** its top
   and bottom edges. Fading only one leaves towers sliced off against black.
-- Dragon lords look for a PNG in `assets/bosses/` and fall back to the vector dragon when
-  there isn't one, so the art set can be filled in a boss at a time. Boss art is a single
+- Cindu banks into horizontal input. It is a draw-time angle only — `P.x`, `P.y` and her
+  collision radius never see it, and the overlays that sit on her stay upright.
+- Art is either inlined or loaded, by how often it is on screen. Cindu is inlined (three
+  frames, `tools/inline-asset.mjs CINDU`) because she is visible every frame and a moment
+  of fallback would show. Dragon lords load from `assets/bosses/` because ten of them would
+  be megabytes.
+- Cindu's three frames are all-or-nothing: a partial set falls back to vectors entirely
+  rather than strobing one raster frame against two vector ones.
+- Dragon lords fall back to the vector dragon when there is no PNG,
+  so the art set can be filled in a boss at a time. Boss art is a single
   frame; the flap is replaced by a procedural bob and breath in `drawBoss`, applied at draw
   time only so collision never sees it.
 - `window.__CINDU` exposes a debug hook (`jump`, `summon`, `power`, `stats`) used

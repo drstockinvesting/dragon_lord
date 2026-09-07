@@ -131,7 +131,7 @@ The alternatives both cost something:
 There is no free option here. Pick deliberately.
 
 **What the backdrop does:** the third option, kept small. `assets/backdrop.png` is the
-editable master and `tools/inline-backdrop.mjs` is a one-command build step that writes the
+editable master and `tools/inline-asset.mjs` is a one-command build step that writes the
 base64 into a marked slot in `index.html`. The game only ever reads the inlined copy, so
 `file://` still works and `assets/` can be deleted without breaking anything. The "build
 step" is a single script with no dependencies and no config, which is a long way from a
@@ -280,3 +280,60 @@ bosses cannot — they draw over the world. `tools/matte.mjs` recovers alpha fro
 white/black render pair and is lossless against a known ground truth (mean alpha
 error 0.014/255). Any future sprite work should reuse it rather than reinventing
 green-screen keying, which destroys the soft glow this art style is built on.
+
+---
+
+## What the Cindu pass cost
+
+Third asset pass. She is the interesting case because she breaks the pattern the bosses
+set, in both directions.
+
+| | |
+|---|---|
+| Code | ~25 lines (slot, `CINDU_ART` loader, `cinduFrame()`, three call sites) plus ~5 for banking |
+| File size | **Zero as shipped** — the slots go out empty. Real art costs ~440KB of base64. |
+| Frame cost | Unchanged. Same one `drawImage` per frame either way. |
+| Boot | Still synchronous. `loadCinduArt()` runs after `buildSprites()` and gates nothing. |
+| New failure modes | None. No art, a partial set, or a corrupt frame all draw the vector dragon. |
+
+### She is inlined; the bosses are not
+
+Opposite calls, same reasoning applied to different facts. Ten bosses at usable quality is
+megabytes, and any one of them is on screen for a couple of minutes per run — loading from
+`assets/` with a vector fallback is the right trade. Cindu is one asset on screen 100% of
+the time, where even two frames of fallback flicker at every game start would be the most
+visible artefact in the game. Guaranteeing she is present beats a uniform mental model.
+
+The rule that falls out: **inline what is always visible, load what is occasionally
+visible.**
+
+### All three frames or none
+
+`CINDU_ART.ready` only flips true once every frame has decoded. A partial set falls back
+to vectors *entirely* rather than mixing sources, because `drawPlayer` cycles frames at
+roughly 2.5 flaps a second — one raster frame among two vector frames would strobe. This
+is the difference between a graceful fallback and a worse-than-nothing one, and it is worth
+copying anywhere a multi-frame asset gets the same treatment.
+
+Empty slots are also never requested. An empty `src` fires `onerror`, so `loadCinduArt`
+returns early unless all three slots are non-empty (verified: zero image requests in the
+shipping configuration).
+
+### The three-frame convention survived here
+
+The bosses dropped it; Cindu keeps it. Thirty images was the problem, not three — and the
+player character is the one thing in the game that genuinely must animate. Where a future
+asset needs multiple frames, generate the middle one as a master and use the image model's
+edit-from-reference mode for the rest; three independent generations drift, and drift at
+flap speed is unmissable.
+
+### Banking
+
+Cindu was the only thing left in the game drawn at a fixed rotation. She now eases toward
+`±CFG.PLAYER.bankMax` from horizontal input, reusing the `angTo` helper the mobs already
+use. It is a draw-time angle only — `P.x`, `P.y` and `CFG.PLAYER.r` never see it, verified
+by confirming movement still measures exactly `CFG.PLAYER.speed` while banked.
+
+The overlays that sit on top of her — the power-ready core, the level-up burst, the hurt
+ring — stay at rotation 0. They are concentric, so rotating them would be invisible but
+wrong; the `0` is passed explicitly with a comment so a later reader does not "fix" it.
