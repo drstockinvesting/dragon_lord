@@ -176,6 +176,99 @@ focal subject. Dim, receding, atmospheric.
 Generate a few and pick the one with the cleanest empty top band. If the top isn't empty
 enough, it's faster to paint it black in any editor than to reroll.
 
+### The bosses — also wired, drop your images in
+
+Like the backdrop, this is built and waiting for art. Unlike the backdrop, the
+bosses are **not** inlined: ten of them at usable quality would be ~5MB of base64,
+which ends the single-file story. They load from `assets/bosses/<slug>.png` at
+runtime instead, and **the vector dragon is the fallback** — a missing, misnamed
+or undecodable file just means that boss draws the way it always has. There is no
+placeholder to maintain and no error state, so the set can be filled in one boss
+at a time.
+
+Filenames and per-file requirements are in
+[`assets/bosses/README.md`](../assets/bosses/README.md). One image per boss — the
+three-frame flap is replaced by a procedural hover bob and breathing scale, which
+removes the hardest consistency problem in the job: getting a model to redraw the
+same dragon with only the wings moved.
+
+#### Alpha is mandatory here, and Gemini can't give it to you
+
+The backdrop dodged the missing alpha channel by sitting on pure black. Boss
+sprites draw **over** the game world, so they need real transparency.
+
+Generate each boss **twice** — same prompt, same session, changing only the last
+line — once on pure white and once on pure black. Then:
+
+```
+node tools/matte.mjs vurath-white.png vurath-black.png assets/bosses/vurath.png
+```
+
+`tools/matte.mjs` solves for alpha by comparing the pair:
+
+```
+on white:  Pw = C*a + 255*(1-a)
+on black:  Pb = C*a
+                              ->   a = 1 - (Pw - Pb)/255,   C = Pb/a
+```
+
+It solves per channel and averages, which absorbs the small colour drift between
+two generations. Round-tripped against a known ground truth it is lossless — mean
+alpha error 0.014/255, zero colour error on solid pixels. Critically it preserves
+soft glow edges, which is the whole reason not to green-screen key here: keying
+eats exactly the amber bloom this art style is built on.
+
+The tool warns if almost nothing came out transparent (usually means both renders
+had the same background) or if very little soft edge was recovered (usually means
+the two generations drifted into different images).
+
+#### The base prompt
+
+```
+A [BOSS DESCRIPTION], drawn as glowing neon vector line art.
+Square image, centred, full body in frame with generous margin.
+
+Style: stroke-only rendering — outlines and thin interior lines, NO solid fills,
+NO shading, NO gradients, NO texture. Soft outer bloom on every stroke, like a
+glowing CRT vector display.
+Palette: amber #FFB000 for the body outline and wings. Purple #B026FF for the
+eyes and a soul-core at the chest.
+
+Pose: side-on symmetrical silhouette, NOSE POINTING UP toward the top of the
+frame, wings spread wide, tail trailing down. The whole creature and its glow
+must sit inside the frame with margin on all sides — nothing clipped.
+
+Background: solid pure white #FFFFFF.
+```
+
+Then regenerate the identical image with the last line changed to
+`Background: solid pure black #000000.` and matte the pair.
+
+The nose-up rule is not stylistic: the boss banks into its movement by rotating
+the image, and rotation 0 means facing up. Art drawn facing sideways will fly
+sideways.
+
+#### Per-boss direction
+
+Each lord's name and attack pattern already imply a design. Feed both in, so the
+silhouette telegraphs the fight:
+
+| Boss | Pattern | Design cue |
+|---|---|---|
+| Vurath the Emberwing | radial | Enormous ember-lit wings, feathers of flame radiating outward |
+| Skoll the Ashmaw | sweep | A vast hinged jaw, ash pouring from the mouth, low and wide |
+| Merexis the Brooder | summon, radial | Bloated body hung with egg sacs; small forms clustered on the back |
+| Tyrn the Swift Lance | volley, sweep | Narrow, streamlined, spear-headed; swept-back blade wings |
+| Azkalor Ringbearer | rings, volley | Concentric stone rings orbiting the body; a halo behind the skull |
+| Nyxheim the Coiled | spiral, radial | Long serpentine body coiled into a spiral, small wings |
+| Draveth the Charger | charge, volley | Heavy armoured bulk, forward-leaning, horned battering skull |
+| Solareth the Cross | cross, summon | Cruciform wing-and-tail silhouette, solar disc behind the head |
+| Vorgaal Souleater | spiral, rings, volley | Gaunt and skeletal, ribs showing, trailing captured souls |
+| **Eanu the Dragon King** | all six | The largest and most ornate. Crowned, ridged spine, regal. **Purple-dominant instead of amber** — he is the usurper, and the HUD already names him in purple. |
+
+Eanu is worth the most effort: he is the climax, he is on screen longest, and he
+is drawn 35% larger than the lords.
+
 ### Effects and landscape — think twice
 
 Effects (particles, rings, the power attack) are the worst fit for generated raster art.

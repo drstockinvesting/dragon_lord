@@ -125,7 +125,7 @@ The alternatives both cost something:
 | Option | Cost |
 |---|---|
 | Inline base64 | Single file preserved; file balloons, source unreadable, no partial caching |
-| `assets/` directory | Clean and cacheable; **breaks `file://` opening** in most browsers due to CORS, so "double-click to play" dies and you need a local server |
+| `assets/` directory | Clean and cacheable. Widely assumed to break `file://` — **it does not, for images.** See the correction below. |
 | Build step | Best of both (dev uses files, ship inlines them); introduces the build step the project explicitly avoids |
 
 There is no free option here. Pick deliberately.
@@ -159,8 +159,9 @@ Ordered by improvement per unit of risk:
    existing wind streaks). Predicted to be the cheapest win; it was.
 2. **Music loops.** Self-contained, doesn't touch rendering, and the current chiptune
    is the weakest part of the presentation. Accept the fixed tempo or generate per phase.
-3. **Boss sprites.** Large on screen, long time on screen, ten distinct named characters
-   the vector renderer genuinely cannot express. Do these before the mobs.
+3. ~~**Boss sprites.**~~ **Pipeline built.** Ten `assets/bosses/*.png` slots, loaded at
+   spawn, with the vector dragon as the fallback for every one. Not inlined — see the
+   size note below.
 4. **Cindu.** One character, three frames, but she's on screen 100% of the time so any
    mismatch in style is maximally visible. Do her only after the bosses have established
    the look.
@@ -212,3 +213,70 @@ The file-size number is the one to watch. One backdrop took `index.html` from 86
 229KB. Ten boss sprites at similar weight would put it past 1.5MB, at which point the
 single-file property stops being worth defending and an `assets/` directory plus a tiny
 local server is the better trade.
+
+
+---
+
+## What the boss pipeline actually cost
+
+The second raster asset path is in. It went differently from the backdrop in ways
+worth recording.
+
+| | |
+|---|---|
+| Code | ~35 lines in `index.html` (config, `loadBossArt`, a branch in `drawBoss`, `art` slugs on the tables) |
+| File size | **Zero.** Nothing is inlined. |
+| Frame cost | One `drawImage` per frame, same as the vector path it replaces |
+| Boot | Unchanged |
+| New failure modes | None. Missing, misnamed or undecodable art draws the vector dragon. |
+
+### Why these are not inlined
+
+Ten bosses at usable quality is roughly 5MB of base64. The backdrop's 143KB was
+affordable; this is not. This is the threshold the backdrop note predicted, reached
+one asset later.
+
+So the bosses invert the model: **the vector renderer stops being the thing being
+replaced and becomes the fallback.** That turns out to be strictly better than a
+committed placeholder — there is no second copy of the art to keep in sync, no
+error state, and a half-finished set is a perfectly valid state where some bosses
+are drawn and some aren't.
+
+### Correction: `file://` does not block this
+
+The distribution table above claimed an `assets/` directory "breaks `file://`
+opening in most browsers due to CORS". **That is wrong, and it was worth testing
+rather than assuming.** Boss art loads fine from `file://` in Chromium.
+
+The distinction is that `<img src>` pointing at a sibling file is permitted; what
+CORS blocks is `fetch()` and *reading pixels back* from a canvas the image has
+tainted. `blit()` only ever calls `drawImage` and never `getImageData`, and a
+grep confirms the game never reads pixels back anywhere. So tainting is harmless
+here.
+
+Two caveats worth keeping: this is browser-dependent (Chromium is permissive;
+don't assume every browser matches), and it would stop being true the moment any
+code wanted to read the main canvas back. The vector fallback covers both cases,
+which is the real reason the design is safe rather than lucky.
+
+### The flap convention did not survive
+
+`buildSprites` and `drawEnemies`/`drawPlayer` all assume three flap frames. Boss
+art uses **one**, because asking an image model for the same dragon three times
+with only the wings moved is the hardest consistency problem in the whole job.
+
+The motion is put back procedurally instead — a hover bob and a breathing scale
+from `CFG.BOSS_ART`, on top of the banking the boss already did. Both are applied
+inside `drawBoss` only; `b.y` and `b.r` stay untouched, so collision is unaffected
+(verified: 240 draw calls across a full bob cycle leave `b.y` byte-identical).
+
+If the mobs ever get raster art, they should follow this pattern rather than the
+three-frame one.
+
+### Alpha, finally
+
+The backdrop dodged Gemini's missing alpha channel by sitting on pure black. The
+bosses cannot — they draw over the world. `tools/matte.mjs` recovers alpha from a
+white/black render pair and is lossless against a known ground truth (mean alpha
+error 0.014/255). Any future sprite work should reuse it rather than reinventing
+green-screen keying, which destroys the soft glow this art style is built on.

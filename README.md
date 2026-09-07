@@ -173,5 +173,9 @@ Technical notes worth knowing before editing:
   lands inside the fire you can see and never outside it.
 - The backdrop tile scrolls and wraps forever, so it fades to nothing at **both** its top
   and bottom edges. Fading only one leaves towers sliced off against black.
+- Dragon lords look for a PNG in `assets/bosses/` and fall back to the vector dragon when
+  there isn't one, so the art set can be filled in a boss at a time. Boss art is a single
+  frame; the flap is replaced by a procedural bob and breath in `drawBoss`, applied at draw
+  time only so collision never sees it.
 - `window.__CINDU` exposes a debug hook (`jump`, `summon`, `power`, `stats`) used
   by the automated playtests.

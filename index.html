@@ -49,6 +49,11 @@ const CFG = {
   SKY: { farSpeed:26, midSpeed:62, farAlpha:0.16, midAlpha:0.30,
          farScale:1.15, maxAlpha:0.34 },
 
+  // Optional boss art. One still image per boss replaces the three flap
+  // frames, so the motion it loses is put back procedurally: a slow hover bob
+  // and a breathing scale, on top of the banking the boss already does.
+  BOSS_ART: { dir:'assets/bosses/', bob:5.5, bobRate:1.7, breathe:0.028, breatheRate:2.3 },
+
   PLAYER: { maxHP:100, damage:10, fireRate:2.5, speed:400, r:15,
             bulletSpeed:780, bulletR:5, iframes:0.85, hitSlop:2 },
 
@@ -107,18 +112,21 @@ const PHASES = [
 ];
 
 // Nine dragon lords, then Eanu.
+/* `art` names an optional PNG in CFG.BOSS_ART.dir. When one loads it replaces
+   the vector dragon; when it does not -- no file, or a file:// page where the
+   browser blocks the read -- the vector renderer draws as it always has. */
 const LORDS = [
-  { name:'VURATH THE EMBERWING', hp:420,  pat:['radial'] },
-  { name:'SKOLL THE ASHMAW',     hp:600,  pat:['sweep'] },
-  { name:'MEREXIS THE BROODER',  hp:820,  pat:['summon','radial'] },
-  { name:'TYRN THE SWIFT LANCE', hp:1050, pat:['volley','sweep'] },
-  { name:'AZKALOR RINGBEARER',   hp:1300, pat:['rings','volley'] },
-  { name:'NYXHEIM THE COILED',   hp:1560, pat:['spiral','radial'] },
-  { name:'DRAVETH THE CHARGER',  hp:1850, pat:['charge','volley'] },
-  { name:'SOLARETH THE CROSS',   hp:2200, pat:['cross','summon'] },
-  { name:'VORGAAL SOULEATER',    hp:2600, pat:['spiral','rings','volley'] },
+  { name:'VURATH THE EMBERWING', hp:420,  pat:['radial'],                  art:'vurath'   },
+  { name:'SKOLL THE ASHMAW',     hp:600,  pat:['sweep'],                   art:'skoll'    },
+  { name:'MEREXIS THE BROODER',  hp:820,  pat:['summon','radial'],         art:'merexis'  },
+  { name:'TYRN THE SWIFT LANCE', hp:1050, pat:['volley','sweep'],          art:'tyrn'     },
+  { name:'AZKALOR RINGBEARER',   hp:1300, pat:['rings','volley'],          art:'azkalor'  },
+  { name:'NYXHEIM THE COILED',   hp:1560, pat:['spiral','radial'],         art:'nyxheim'  },
+  { name:'DRAVETH THE CHARGER',  hp:1850, pat:['charge','volley'],         art:'draveth'  },
+  { name:'SOLARETH THE CROSS',   hp:2200, pat:['cross','summon'],          art:'solareth' },
+  { name:'VORGAAL SOULEATER',    hp:2600, pat:['spiral','rings','volley'], art:'vorgaal'  },
 ];
-const EANU = { name:'EANU THE DRAGON KING', hp:5200,
+const EANU = { name:'EANU THE DRAGON KING', hp:5200, art:'eanu',
                pat:['radial','sweep','volley','spiral','rings','cross'] };
 
 // Power attack tiers. Unlocked by cumulative dragon-lord kills.
@@ -1277,12 +1285,13 @@ function spawnLord(){
   const isEanu = G.lordsKilled >= LORDS.length;
   const def = isEanu ? EANU : LORDS[Math.min(G.lordsKilled, LORDS.length-1)];
   G.boss = {
-    name:def.name, maxHP:def.hp, hp:def.hp, pats:def.pat, isEanu,
+    name:def.name, maxHP:def.hp, hp:def.hp, pats:def.pat, isEanu, art:def.art,
     x:CFG.W/2, y:-140, t:0, r:isEanu ? 60 : 44,
     patIdx:0, patT:0, swT:0, fireT:0.8, spiral:0,
     mode:'enter', dieT:0, hitT:0, flap:0, eanuStage:0, face:Math.PI,
   };
   buildBossSprites(G.boss);
+  loadBossArt(def.art, isEanu);   // vectors draw until (and unless) it arrives
   Audio2.SFX.lordSpawn();
   Audio2.setTrack('boss', G.phase);
   showCard(isEanu ? 'THE DRAGON KING RETURNS' : 'DRAGON LORD', def.name);
@@ -1647,21 +1656,58 @@ function drawEnemies(){
     }
   }
 }
+function bossSpriteHalf(isEanu){
+  return spriteHalf({ s: isEanu ? 54 : 40, span:1.16, tail:1.40, pb:18 });
+}
 function buildBossSprites(b){
   const s = b.isEanu ? 54 : 40;
-  const half = spriteHalf({ s, span:1.16, tail:1.40, pb:18 });
+  const half = bossSpriteHalf(b.isEanu);
   b.spr = [0,1,2].map(i => makeSprite(half, x => glowStroke(x,
     xx => dragonPath(xx, s, [0.2,0.6,0.95][i], { span:1.16, crown:true, ridge:b.isEanu }),
     { lw:1.6, lwMid:2.2, lwOuter:3.2, pb:18, ab:9 })));
   b.spr.forEach(c => dragonEyes(c.getContext('2d'), s));
 }
+
+/* Boss art is opportunistic. Each slug is fetched once per session; until it
+   arrives -- and forever, if it never does -- drawBoss falls through to the
+   vector sprites. Nothing is gated on it, so a missing file, a 404 or a
+   file:// page that the browser refuses to read all degrade to the game
+   exactly as it renders without any art at all. */
+const BOSS_ART = {};
+function loadBossArt(slug, isEanu){
+  if (!slug || BOSS_ART[slug]) return BOSS_ART[slug];
+  const rec = { img:new Image(), ready:false };
+  rec.img.onload = () => {
+    // blit() reads .dim, so the raster lands in the same box as the vector
+    // sprite it replaces -- same size on screen, same relationship to b.r.
+    rec.img.dim = bossSpriteHalf(isEanu)*2 + 32;
+    rec.ready = true;
+  };
+  rec.img.onerror = () => { rec.ready = false; };
+  BOSS_ART[slug] = rec;
+  rec.img.src = CFG.BOSS_ART.dir + slug + '.png';
+  return rec;
+}
+
 function drawBoss(){
   const b = G.boss; if (!b) return;
   if (!b.spr) buildBossSprites(b);      // fallback if a boss was restored
-  const fr = ((b.flap|0) % 3 + 3) % 3;
   const dyingScale = b.mode === 'dying' ? 1 + b.dieT*0.14 : 1;
   const alpha = b.mode === 'dying' ? clamp(1 - b.dieT/2.1, 0, 1) : 1;
-  blit(b.spr[fr], b.x, b.y, b.face, alpha, dyingScale);
+  const art = b.art && BOSS_ART[b.art];
+
+  if (art && art.ready){
+    // One still image, so the flap is replaced by a hover bob and a breath.
+    // Both are visual only -- b.y stays the collision truth.
+    const K = CFG.BOSS_ART;
+    const bob = Math.sin(G.t * K.bobRate) * K.bob;
+    const breathe = 1 + Math.sin(G.t * K.breatheRate) * K.breathe;
+    blit(art.img, b.x, b.y + bob, b.face, alpha, dyingScale * breathe);
+  } else {
+    const fr = ((b.flap|0) % 3 + 3) % 3;
+    blit(b.spr[fr], b.x, b.y, b.face, alpha, dyingScale);
+  }
+
   if (b.hitT > 0){
     ctx.strokeStyle = purple(b.hitT*0.85); ctx.lineWidth = 3;
     ctx.beginPath(); ctx.arc(b.x, b.y, b.r + 8, 0, TAU); ctx.stroke();
