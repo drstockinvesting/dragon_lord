@@ -1,7 +1,7 @@
 # Cindu: Dragon Lord
 
-A vertical-scrolling dragon shooter. One HTML file, no dependencies, no build step,
-no downloaded assets. Plays on a phone and on a desktop keyboard.
+A vertical-scrolling dragon shooter. One HTML file, no dependencies, nothing downloaded
+at runtime. Plays on a phone and on a desktop keyboard.
 
 **Play it:** open `index.html` in any modern browser.
 
@@ -49,6 +49,11 @@ Kill minor dragons. Every kill drops **1 fire soul shard**.
 10 shards  =  1 dragon fire soul
 10 souls   =  1 stat upgrade  (+10 max HP, +8% damage, +6% fire rate)
 ```
+
+The three rewards are deliberately three sizes. A shard fires on every kill, so it stays
+a rising blip and a pulse on the HUD counter. A soul is ten of those and earns a ring, a
+flash and a nudge of screen shake. A level is a hundred, takes the screen, and **restores
+Cindu to full health** — the card says SOUL RESTORED, so it restores her.
 
 A **dragon lord** appears every 100 minor dragons killed — nine of them — and each
 is worth a whole fire soul. After 1000 minor dragons, **Eanu the Dragon King**
@@ -118,7 +123,14 @@ you back to the last dragon-lord checkpoint, not to zero.
 ## Look and sound
 
 Three colours only: black background, amber outlines, purple effects. Every dragon
-is a stroked vector path — no sprites, no images.
+is a stroked vector path.
+
+Behind them, a three-layer parallax backdrop of ruined citadel spires — the throne Eanu
+took — drifts past: two spire layers off one image plus the wind streaks in front. The
+image is base64-inlined, so it is still one file you can double-click. `assets/backdrop.png`
+is the editable master; swap the art with
+`node tools/inline-asset.mjs BACKDROP assets/backdrop.png` and see
+[`docs/AI-ASSETS.md`](docs/AI-ASSETS.md) for what a replacement tile has to satisfy.
 
 All audio is synthesised at runtime with Web Audio oscillators and filtered noise:
 a driving major-key loop for regular waves, a minor-key tritone drone for boss
@@ -138,6 +150,11 @@ main loop.
 `ARCHETYPES`, `PHASES`, `LORDS`, `EANU` and `POWER_TIERS` tables directly beneath
 it. Tuning the game should not require touching any logic.
 
+Thinking about replacing the vector art or the chiptune with generated assets? Read
+[`docs/AI-ASSETS.md`](docs/AI-ASSETS.md) for the tools and
+[`docs/ASSET-PIPELINE.md`](docs/ASSET-PIPELINE.md) for what the code would have to
+change — which is the larger half of the job.
+
 Technical notes worth knowing before editing:
 
 - The virtual resolution is a fixed 540×960, scaled to fit with letterboxing, so
@@ -151,5 +168,26 @@ Technical notes worth knowing before editing:
   tab cannot spiral.
 - Music is scheduled with a lookahead against `AudioContext.currentTime`; firing
   notes straight off `setTimeout` drifts audibly.
+- Cindu's fireball has two radii: `b.r` drives the drawing and `b.hr` drives
+  collision. `hr` tracks the visible flame at half its growth rate, so a hit always
+  lands inside the fire you can see and never outside it.
+- The backdrop tile scrolls and wraps forever, so it fades to nothing at **both** its top
+  and bottom edges. Fading only one leaves towers sliced off against black.
+- Cindu banks into horizontal input. It is a draw-time angle only — `P.x`, `P.y` and her
+  collision radius never see it, and the overlays that sit on her stay upright.
+- Art is either inlined or loaded, by how often it is on screen. Cindu is inlined (three
+  frames, `tools/inline-asset.mjs CINDU`) because she is visible every frame and a moment
+  of fallback would show. Dragon lords load from `assets/bosses/` because ten of them would
+  be megabytes.
+- Cindu's three frames are all-or-nothing: a partial set falls back to vectors entirely
+  rather than strobing one raster frame against two vector ones.
+- Dragon lords and minor mobs fall back to the vector dragon when there is no PNG, so
+  either art set can be filled in one at a time. Mob art is per archetype rather than per
+  sprite kind, so a diver, a strafer and a weaver can stop looking identical — the point
+  is reading a threat before it acts, not decoration.
+- Boss art is fetched when the boss spawns; mob art is preloaded at boot, because mobs
+  turn up about two seconds into a run. Boss art is a single
+  frame; the flap is replaced by a procedural bob and breath in `drawBoss`, applied at draw
+  time only so collision never sees it.
 - `window.__CINDU` exposes a debug hook (`jump`, `summon`, `power`, `stats`) used
   by the automated playtests.
