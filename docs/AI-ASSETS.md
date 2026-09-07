@@ -359,6 +359,63 @@ silhouette telegraphs the fight:
 Eanu is worth the most effort: he is the climax, he is on screen longest, and he
 is drawn 35% larger than the lords.
 
+### The minor mobs — wired, and worth more than they look
+
+I ranked these last twice and called the payoff small. As *decoration* that was right:
+they render at 114–134px and move fast, so a generated dragon and the vector one look
+nearly the same in flight.
+
+But that reasoning missed the actual case. **Nine archetypes share four sprites.** A
+`diver` homes on you at 1.45× speed, a `strafer` oscillates at 1.25×, a `weaver` runs a
+fast sine — and all three are drawn as `swift`. A `spreader` fires three at once and a
+`burster` fires three in sequence; both look like a `caster`. Distinct silhouettes let a
+player read a threat *before* it commits.
+
+So the goal here is **readability, not prettiness** — and that is worth doing at 118px in
+a way that "nicer dragons" is not.
+
+Filenames, fallbacks and per-archetype design cues are in
+[`assets/mobs/README.md`](../assets/mobs/README.md). They load from `assets/mobs/` like
+the bosses, but are **preloaded at boot** rather than at spawn, because mobs appear about
+2.2 seconds into a run. Fallback is per archetype, so fill the set in one at a time.
+
+**One frame each, 256×256.** Mobs already bank into their movement, and they are small,
+numerous and fast — the flap is far less legible on them than on Cindu, and no procedural
+bob is added either because their own movement provides it. 256 is a quarter of Cindu's
+512, which is what makes nine of these affordable.
+
+They need alpha like everything else that draws over the world, so the same white/black
+pair and `tools/matte.mjs` workflow applies.
+
+#### The prompt
+
+```
+A [MOB DESCRIPTION], drawn as glowing neon vector line art.
+Square image, centred, full body in frame with generous margin.
+
+Style: stroke-only rendering — outlines and thin interior lines, NO solid fills,
+NO shading, NO gradients, NO texture. Soft outer bloom on every stroke, like a
+glowing CRT vector display.
+Palette: amber #FFB000 for the body outline and wings. Purple #B026FF for the
+eyes only.
+
+Pose: seen from directly above, NOSE POINTING UP toward the top of the frame,
+symmetrical left-to-right, wings spread, tail trailing straight down.
+
+Smaller and meaner than the dragon king — a lesser dragon, not a boss. Simpler
+shape, fewer ornaments, no crown.
+
+Background: solid pure white #FFFFFF.
+```
+
+Then the same with `Background: solid pure black #000000.` and matte the pair.
+
+**Pass Cindu in as the style reference**, and say "smaller and simpler than this". These
+sit next to her constantly; a mob that out-detailed the player character would read as
+wrong. The single most useful direction to give the model is the per-archetype cue —
+"wings folded back, dart-shaped" for a diver, "heavy plating, thick and blunt" for an
+armored — because that silhouette difference is the entire reason for doing this.
+
 ### Effects and landscape — think twice
 
 Effects (particles, rings, the power attack) are the worst fit for generated raster art.

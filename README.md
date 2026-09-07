@@ -181,8 +181,12 @@ Technical notes worth knowing before editing:
   be megabytes.
 - Cindu's three frames are all-or-nothing: a partial set falls back to vectors entirely
   rather than strobing one raster frame against two vector ones.
-- Dragon lords fall back to the vector dragon when there is no PNG,
-  so the art set can be filled in a boss at a time. Boss art is a single
+- Dragon lords and minor mobs fall back to the vector dragon when there is no PNG, so
+  either art set can be filled in one at a time. Mob art is per archetype rather than per
+  sprite kind, so a diver, a strafer and a weaver can stop looking identical — the point
+  is reading a threat before it acts, not decoration.
+- Boss art is fetched when the boss spawns; mob art is preloaded at boot, because mobs
+  turn up about two seconds into a run. Boss art is a single
   frame; the flap is replaced by a procedural bob and breath in `drawBoss`, applied at draw
   time only so collision never sees it.
 - `window.__CINDU` exposes a debug hook (`jump`, `summon`, `power`, `stats`) used

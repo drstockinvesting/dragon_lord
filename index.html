@@ -54,6 +54,10 @@ const CFG = {
   // and a breathing scale, on top of the banking the boss already does.
   BOSS_ART: { dir:'assets/bosses/', bob:5.5, bobRate:1.7, breathe:0.028, breatheRate:2.3 },
 
+  // Optional mob art, one PNG per archetype. No bob here -- unlike a hovering
+  // boss, a mob's own movement and banking already carry it.
+  MOB_ART: { dir:'assets/mobs/' },
+
   PLAYER: { maxHP:100, damage:10, fireRate:2.5, speed:400, r:15,
             bulletSpeed:780, bulletR:5, iframes:0.85, hitSlop:2,
             bankMax:0.25, bankTurn:7 },   // tilt into horizontal input
@@ -85,7 +89,14 @@ const CFG = {
   OPT_KEY:  'cindu_dragon_lord_opts_v1',
 };
 
-// Enemy archetypes. `art` picks the pre-rendered sprite; `ai` picks behaviour.
+/* Enemy archetypes. `ai` picks behaviour; `art` picks which of the four vector
+   sprites to draw. Nine archetypes share those four, so a diver, a strafer and
+   a weaver all look like `swift` today.
+
+   Optional art fixes that: the archetype KEY names a PNG in CFG.MOB_ART.dir, so
+   each behaviour can get its own silhouette and be read before it acts. `art`
+   stays the fallback when no PNG exists, per archetype -- the set fills in one
+   at a time. */
 const ARCHETYPES = {
   drifter : { art:'minor',   ai:'drift',  hp:1.00, spd:1.00, rate:1.00, shots:1 },
   strafer : { art:'swift',   ai:'strafe', hp:0.85, spd:1.25, rate:1.00, shots:1 },
@@ -1683,8 +1694,14 @@ function drawEnemies(){
   const a = pools.en.active;
   for (let i=0;i<a.length;i++){
     const e = a[i];
-    const fr = ((e.flap|0) % 3 + 3) % 3;
-    blit(SPR[e.art][fr], e.x, e.y, e.face, e.mode === 'orbiting' ? 0.94 : 1);
+    const art = MOB_ART[e.type];
+    const alpha = e.mode === 'orbiting' ? 0.94 : 1;
+    if (art && art.ready){
+      blit(art.img, e.x, e.y, e.face, alpha);      // one frame; banking is the motion
+    } else {
+      const fr = ((e.flap|0) % 3 + 3) % 3;
+      blit(SPR[e.art][fr], e.x, e.y, e.face, alpha);
+    }
     if (e.burn > 0){
       ctx.strokeStyle = purple(0.35 + 0.25*Math.sin(G.t*24)); ctx.lineWidth = 1.6;
       ctx.beginPath(); ctx.arc(e.x, e.y, e.r + 6, 0, TAU); ctx.stroke();
@@ -1729,6 +1746,28 @@ function loadBossArt(slug, isEanu){
   BOSS_ART[slug] = rec;
   rec.img.src = CFG.BOSS_ART.dir + slug + '.png';
   return rec;
+}
+
+/* Preloaded at boot rather than at spawn like the bosses: mobs appear within
+   the first couple of seconds of a run (G.spawnTimer starts at 2.2), so waiting
+   until the first spawn would risk a visible pop. Nine small images resolve long
+   before anything needs them. */
+const MOB_ART = {};
+function loadMobArt(){
+  for (const type in ARCHETYPES){
+    const rec = { img:new Image(), ready:false };
+    const kind = ARCHETYPES[type].art;
+    rec.img.onload = () => {
+      // Box it as the vector sprite it replaces -- each archetype takes the
+      // dim of its OWN fallback kind, so a swift-backed diver and a
+      // caster-backed orbiter each land at the right size.
+      rec.img.dim = SPR[kind][0].dim;
+      rec.ready = true;
+    };
+    rec.img.onerror = () => { rec.ready = false; };
+    MOB_ART[type] = rec;
+    rec.img.src = CFG.MOB_ART.dir + type + '.png';
+  }
 }
 
 function drawBoss(){
@@ -2248,6 +2287,7 @@ document.addEventListener('visibilitychange', () => {
 /* ================================ BOOT ================================= */
 buildSprites();
 loadCinduArt();          // needs SPR.cindu for its box; no-ops when unset
+loadMobArt();            // likewise SPR[kind]; resolves before the first spawn
 buildWind();
 resize();
 (function loadSave(){

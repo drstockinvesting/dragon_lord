@@ -16,12 +16,17 @@ source.
 
 `node tools/inline-asset.mjs <SLOT> --clear` reverts a slot to the vector renderer.
 
-## Loaded at runtime — occasionally on screen
+## Loaded at runtime — too many to inline
 
-`bosses/*.png` are read from disk when a boss spawns, never inlined — ten of them
-would be megabytes. See [`bosses/README.md`](bosses/README.md).
+| Directory | When it loads | Why |
+|---|---|---|
+| `bosses/*.png` | at spawn | one at a time, announced by a card; ten inlined would be megabytes |
+| `mobs/*.png` | at boot | mobs appear ~2.2s into a run, too soon to fetch at spawn |
 
-The rule: **inline what is always visible, load what is occasionally visible.**
+See [`bosses/README.md`](bosses/README.md) and [`mobs/README.md`](mobs/README.md).
+
+The rule: **inline what is always visible, load what is not** — and fetch at boot when
+the asset is needed within seconds, at spawn when it is needed in minutes.
 
 ## What's here now is placeholder
 

@@ -165,7 +165,8 @@ Ordered by improvement per unit of risk:
 4. **Cindu.** One character, three frames, but she's on screen 100% of the time so any
    mismatch in style is maximally visible. Do her only after the bosses have established
    the look.
-5. **Minor mobs.** Last. They're 32–40px and moving fast; the payoff is small.
+5. ~~**Minor mobs.**~~ **Pipeline built** — and the "payoff is small" call was half wrong.
+   See below.
 6. **Effects.** Don't. They're procedural, they scale and fade per-frame, and a sprite
    sheet would be bigger, less flexible and worse than the ~15 lines of canvas code
    each one costs now.
@@ -337,3 +338,65 @@ by confirming movement still measures exactly `CFG.PLAYER.speed` while banked.
 The overlays that sit on top of her — the power-ready core, the level-up burst, the hurt
 ring — stay at rotation 0. They are concentric, so rotating them would be invisible but
 wrong; the `0` is passed explicitly with a comment so a later reader does not "fix" it.
+
+---
+
+## What the mob pass cost
+
+Fourth and final asset path.
+
+| | |
+|---|---|
+| Code | ~20 lines (`CFG.MOB_ART`, `loadMobArt`, one branch in `drawEnemies`, one boot call) |
+| File size | **Zero.** Loaded, not inlined. |
+| Frame cost | One `drawImage` per mob, same as the vector path it replaces. Median frame time unchanged with a full screen. |
+| Boot | Still synchronous. `loadMobArt()` fires nine requests and gates nothing. |
+| New failure modes | None. A missing PNG draws that archetype's vector kind. |
+
+### The "low payoff" call was half wrong
+
+Ranked last, twice, on the grounds that mobs are small and fast so generated art would
+look much like the vector art. That holds — as *decoration*.
+
+What it missed: nine archetypes share four sprites. Three different threats are drawn
+identically, so behaviour is not readable from the sprite. Framed as **readability rather
+than prettiness**, mob art is worth more than the ordering implied. The lesson generalises:
+when ranking asset work, ask what the art would *tell* the player, not just how it would
+look.
+
+### Preloaded, not loaded at spawn
+
+Bosses fetch at spawn — there is one, and it announces itself with a card. Mobs appear
+about 2.2s into a run (`G.spawnTimer` starts at 2.2), so they are all fetched during boot
+instead. Nine 28KB images resolve long before the first spawn, and there is no pop.
+
+### The slug already existed
+
+No new config field. `spawnEnemy()` already stored `e.type`, so the archetype key names
+the PNG while `art:` keeps its existing job of naming the vector fallback. One key, two
+jobs, cleanly separated — worth looking for before adding a field.
+
+Each archetype boxes to **its own** fallback kind's dimension (`SPR[ARCHETYPES[t].art][0].dim`),
+so a `swift`-backed diver lands at 134px and a `caster`-backed orbiter at 120px. Verified
+per kind rather than assumed.
+
+---
+
+## The completed rule
+
+Four passes, three delivery mechanisms, one rule:
+
+| Asset | On screen | Delivery | Frames |
+|---|---|---|---|
+| Backdrop | always | inlined | 1, wrapping |
+| Cindu | always | inlined | 3 |
+| Minor mobs | most of the time | loaded, preloaded at boot | 1 |
+| Bosses | occasionally | loaded, fetched at spawn | 1 |
+
+**Inline what is always visible; load what is not.** Fetch at boot when the asset is
+needed within seconds, at spawn when it is needed in minutes.
+
+And on frames: three only where the animation is legible and the subject is singular
+(Cindu). Everywhere else one frame plus motion the engine already provides — banking for
+mobs, banking plus a bob for bosses. The three-frame convention is a cost paid per asset
+in generation difficulty, not just bytes, and it is only worth it once.
