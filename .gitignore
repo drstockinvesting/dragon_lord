@@ -1,0 +1,4 @@
+# The game ships no image assets by design -- every dragon is a stroked vector
+# path drawn at runtime. Any PNG here is a screenshot from a headless playtest.
+*.png
+node_modules/
