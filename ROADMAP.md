@@ -1,5 +1,22 @@
 # Milestone: Make the first 30 seconds feel like flight
 
+## Status — BUILT, awaiting a playtest
+
+All three parts are implemented and verified headlessly: the world scrolls, dragons
+crumple and fall into it, hits have a voice. What remains is **tuning**, and the
+numbers below are starting points, not answers.
+
+The knobs, in the order they are likely to be wrong:
+
+| Knob | Now | If it feels wrong |
+|---|---|---|
+| `CFG.WORLD.speed` | 120 | Too slow = still feels static. Too fast = nauseating, and it will overtake the dragons. |
+| `CFG.ENEMY.speed` | 165 | **Must stay above `WORLD.speed`** or dragons appear to fly backwards. |
+| `CFG.WORLD.layers[].a` | .16/.28/.46 | Terrain competing with dragons for attention = lower these. |
+| `CFG.FEEL.hitstop` | 0.05 | Above ~0.08 reads as lag, below ~0.03 is imperceptible. |
+| `CFG.FEEL.fallDur` | 0.8–1.15s | How long a body hangs in the air before it lands. |
+| `CFG.WORLD.markEvery` | 9–18s | How often a landmark crosses. |
+
 ## Context
 
 Cindu: Dragon Lord is a complete, working, single-file vertical shooter — and it is

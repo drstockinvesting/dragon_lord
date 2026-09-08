@@ -39,6 +39,9 @@
 const CFG = {
   W: 540, H: 960,                     // virtual resolution (9:16)
   BG:'#000000', AMBER:'#FFB000', PURPLE:'#B026FF',
+  // The land is deliberately cool and dim. The whole readability rule of the
+  // game is: cool = the world, warm = things that can kill you or help you.
+  LAND:'#4A6FA5',
 
   FIELD: { top: 92, bottom: 760, left: 26, right: 514 },   // Cindu's flight box
 
@@ -57,7 +60,9 @@ const CFG = {
   PHASE_STEP: { hp:1.15, speed:1.06, fireRate:1.10, bulletSpeed:1.05,
                 spawn:0.92, maxConc:0.7 },
 
-  ENEMY: { hp:20, speed:74, fireRate:0.30, bulletSpeed:215, r:15, bulletR:6,
+  // Enemy speed is read AGAINST the world scroll, not in isolation: a dragon
+  // slower than the ground appears to fly backwards. Keep it above WORLD.speed.
+  ENEMY: { hp:20, speed:165, fireRate:0.30, bulletSpeed:215, r:15, bulletR:6,
            contactDmg:9, bulletDmg:7 },
 
   SPAWN: { interval:1.55, maxConcurrent:5 },
@@ -66,7 +71,31 @@ const CFG = {
   ORBIT_FIRE_MUL: 0.6,    // circlers are worn down and fire slower
   POWER: { cooldown:30, hpGate:0.5 },
 
-  POOL: { pBullets:220, eBullets:420, enemies:48, particles:700, floaters:24 },
+  POOL: { pBullets:220, eBullets:420, enemies:48, particles:700, floaters:24,
+          corpses:24 },
+
+  // Three parallax layers of contour ridges. `mul` is a multiple of `speed`,
+  // so the whole world accelerates from one number.
+  WORLD: {
+    speed: 120,                        // px/s of the near layer at full boost
+    layers: [
+      { mul:0.34, a:0.16, gap:152, amp:24, drift:0.21, lw:1.0 },   // far
+      { mul:0.62, a:0.28, gap:122, amp:33, drift:0.30, lw:1.1 },   // mid
+      { mul:1.00, a:0.46, gap: 98, amp:44, drift:0.42, lw:1.3 },   // near
+    ],
+    markEvery: [9, 18],                // seconds between landmarks
+  },
+
+  // Feel. Small numbers, disproportionate effect.
+  FEEL: {
+    hitstop: 0.05,       // seconds the whole sim holds on a kill (~3 frames)
+    hitShake: 1.6,       // a bullet connecting
+    killShake: 4.5,      // a dragon dying
+    fallDur: [1.15, 0.8],// seconds a body takes to reach the ground
+    fallScale: 0.55,     // how far it shrinks -- receding IS falling, overhead
+    gravity: 250,
+    wreckFade: 4.5,      // seconds a wreck lingers before it is gone
+  },
 
   SAVE_KEY: 'cindu_dragon_lord_save_v1',
   OPT_KEY:  'cindu_dragon_lord_opts_v1',
@@ -168,6 +197,7 @@ function faceVelocity(o, vx, vy, dt, turn, limit){
 
 function amber(a){ return a >= 1 ? CFG.AMBER : 'rgba(255,176,0,'+a+')'; }
 function purple(a){ return a >= 1 ? CFG.PURPLE : 'rgba(176,38,255,'+a+')'; }
+function land(a){ return a >= 1 ? CFG.LAND : 'rgba(74,111,165,'+a+')'; }
 
 /** Fixed-size object pool with O(1) alloc/release and swap-removal. */
 function Pool(factory, size){
@@ -308,6 +338,18 @@ const Audio2 = (function(){
       noise({cut0:400, cut1:5200, dur:0.42+tier*0.06, gain:0.20, filter:'bandpass', q:0.8});
       for (let i=0;i<=tier;i++)
         tone({type:'triangle', f0:mtof(62+i*5), dur:0.5, gain:0.07, t:t0+0.05+i*0.045});
+    },
+    // Fires several times a second, so it has to sit UNDER the fire sound
+    // rather than compete with it. Short, dry, quiet.
+    hit(){
+      noise({cut0:3400, cut1:1500, dur:0.042, gain:0.050, filter:'bandpass', q:1.3});
+      tone({type:'square', f0:540, f1:300, dur:0.038, gain:0.032, slide:'exp'});
+    },
+    // A body hitting the ground a long way below: all low end, no crack.
+    impact(){
+      noise({cut0:300, cut1:70, dur:0.30, gain:0.070, filter:'lowpass'});
+      tone({type:'sawtooth', f0:88, f1:38, dur:0.22, gain:0.048, slide:'exp',
+            filter:'lowpass', cut:400});
     },
     enemyDie(){
       noise({cut0:1800, cut1:180, dur:0.24, gain:0.20, filter:'bandpass', q:0.7});
@@ -665,25 +707,199 @@ function blit(spr, x, y, rot, alpha, scale){
   ctx.restore();
 }
 
-/* --------------------------- scrolling backdrop ------------------------ */
-const WIND = [];
-function buildWind(){
-  WIND.length = 0;
-  for (let i=0;i<64;i++)
-    WIND.push({ x:rnd(CFG.W), y:rnd(CFG.H), len:rnd(46,10), sp:rnd(1,0.25) });
+/* ============================== THE WORLD ==============================
+   Three parallax layers of contour ridges scrolling under Cindu, plus
+   landmarks crossing on the near layer, so she is flying OVER somewhere
+   instead of sliding around inside a black box.
+
+   Two rules hold this together:
+
+   - Everything here is drawn in land(), never amber. Cool is the world;
+     warm is things that can kill you or help you. Without that separation
+     the terrain, the dragons and Cindu's own fire become one soup.
+   - ONE path and ONE stroke per layer, and no shadowBlur anywhere. Terrain
+     is by far the highest line count on screen, and shadowBlur per stroke
+     per frame is what kills framerate on a phone.
+
+   Successive ridges in a layer sample the same slowly drifting wave, so they
+   read as contour lines of one landscape rather than unrelated squiggles.
+   ======================================================================== */
+const RIDGE_N = 26;                         // points across one contour line
+const RIDGE_X = [];
+for (let i=0;i<RIDGE_N;i++) RIDGE_X.push(-24 + i * (CFG.W + 48) / (RIDGE_N - 1));
+
+const ridges = new Pool(() => ({ y:0, li:0, ys:new Float32Array(RIDGE_N) }), 72);
+const marks  = new Pool(() => ({ y:0, x:0, kind:0, s:1, seed:0 }), 6);
+const WORLD  = { ph:[0,0,0], acc:[0,0,0], markT:5 };
+
+function emitRidge(li, y){
+  const L = CFG.WORLD.layers[li];
+  const r = ridges.alloc(); if (!r) return;
+  r.y = y; r.li = li;
+  const ph = WORLD.ph[li];
+  // Relief swells and subsides as the run goes on, so you cross plains and then
+  // mountains instead of one uniform ripple the whole way down.
+  const amp = L.amp * (0.42 + 0.58 * (0.5 + 0.5*Math.sin(ph * 0.105 + li)));
+  for (let i=0;i<RIDGE_N;i++){
+    const u = i / (RIDGE_N - 1) * TAU;
+    let v = 0.60*Math.sin(u*1.3 + ph) +
+            0.28*Math.sin(u*2.7 + ph*1.7 + 1.3) +
+            0.12*Math.sin(u*4.9 + ph*0.6 + 2.6);
+    // Sharpen the crests, flatten the troughs. A ridgeline is not a sinusoid,
+    // and pure sines are exactly what made the old backdrop read as ripples.
+    v = v > 0 ? Math.pow(v, 1.5) : -0.5 * Math.pow(-v, 1.25);
+    r.ys[i] = amp * v * 1.6;
+  }
+  WORLD.ph[li] += L.drift;
 }
-function updateWind(dt, boost){
-  for (const w of WIND){
-    w.y += (110 + w.sp*300) * (boost||1) * dt;
-    if (w.y - w.len > CFG.H){ w.y = -rnd(40); w.x = rnd(CFG.W); w.len = rnd(46,10); }
+
+function buildWorld(){
+  ridges.clear(); marks.clear();
+  WORLD.ph  = [rnd(9), rnd(9), rnd(9)];
+  WORLD.acc = [0,0,0];
+  WORLD.markT = 5;
+  const Ls = CFG.WORLD.layers;
+  for (let li=0; li<Ls.length; li++)                 // prefill: never open on a bare screen
+    for (let y = -Ls[li].gap; y < CFG.H + Ls[li].gap; y += Ls[li].gap)
+      emitRidge(li, y);
+}
+
+function spawnMark(){
+  const m = marks.alloc(); if (!m) return;
+  m.kind = (Math.random() * 5) | 0;
+  m.x = rnd(CFG.W - 130, 130);
+  m.y = -150;
+  m.s = rnd(1.25, 0.85);
+  m.seed = rnd(TAU);
+}
+
+function updateWorld(dt, boost){
+  const b = boost === undefined ? 1 : boost;
+  const base = CFG.WORLD.speed * b;
+  const Ls = CFG.WORLD.layers;
+
+  const a = ridges.active;
+  for (let i=a.length-1;i>=0;i--){
+    const r = a[i];
+    r.y += base * Ls[r.li].mul * dt;
+    if (r.y - Ls[r.li].amp > CFG.H + 40) ridges.release(i);
+  }
+  for (let li=0; li<Ls.length; li++){
+    WORLD.acc[li] += base * Ls[li].mul * dt;
+    while (WORLD.acc[li] >= Ls[li].gap){
+      WORLD.acc[li] -= Ls[li].gap;
+      emitRidge(li, -Ls[li].gap - WORLD.acc[li]);
+    }
+  }
+
+  const near = Ls[Ls.length-1].mul;
+  const ms = marks.active;
+  for (let i=ms.length-1;i>=0;i--){
+    const m = ms[i];
+    m.y += base * near * dt;
+    if (m.y > CFG.H + 200) marks.release(i);
+  }
+  WORLD.markT -= dt * b;
+  if (WORLD.markT <= 0){
+    spawnMark();
+    WORLD.markT = rnd(CFG.WORLD.markEvery[1], CFG.WORLD.markEvery[0]);
   }
 }
-function drawWind(){
-  ctx.lineWidth = 1;
-  for (const w of WIND){
-    ctx.strokeStyle = amber(0.05 + w.sp*0.13);
-    ctx.beginPath(); ctx.moveTo(w.x, w.y); ctx.lineTo(w.x, w.y + w.len); ctx.stroke();
+
+/* Landmarks: a river, a lake, a burning village, a ruined keep, a forest.
+   They are what turns "a texture is moving" into "I have travelled somewhere". */
+function drawMarks(){
+  const ms = marks.active;
+  for (let i=0;i<ms.length;i++){
+    const m = ms[i], s = m.s;
+    ctx.strokeStyle = land(0.40);
+    switch (m.kind){
+      case 0:                                   // river, running clear across
+        ctx.lineWidth = 1.4;
+        for (let o=-1;o<=1;o+=2){
+          ctx.beginPath();
+          for (let k=0;k<=16;k++){
+            const x = -20 + k*(CFG.W+40)/16;
+            const y = m.y + o*7*s + Math.sin(k*0.62 + m.seed) * 26*s;
+            k ? ctx.lineTo(x,y) : ctx.moveTo(x,y);
+          }
+          ctx.stroke();
+        }
+        break;
+      case 1:                                   // lake
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        for (let k=0;k<=20;k++){
+          const a2 = k/20*TAU;
+          const rr = (46 + 13*Math.sin(a2*3 + m.seed) + 8*Math.sin(a2*5 + m.seed*2)) * s;
+          const x = m.x + Math.cos(a2)*rr*1.35, y = m.y + Math.sin(a2)*rr;
+          k ? ctx.lineTo(x,y) : ctx.moveTo(x,y);
+        }
+        ctx.closePath(); ctx.stroke();
+        break;
+      case 2: {                                 // village
+        ctx.lineWidth = 1.3;
+        ctx.beginPath();
+        for (let k=0;k<7;k++){
+          const hx = m.x + Math.cos(m.seed + k*1.9)*44*s;
+          const hy = m.y + Math.sin(m.seed + k*2.3)*30*s;
+          ctx.rect(hx-5.5*s, hy-4*s, 11*s, 8*s);
+        }
+        ctx.stroke();
+        // It is burning -- the one warm light in a cool world, so it pulls the eye.
+        ctx.strokeStyle = amber(0.30 + 0.22*Math.sin(G.t*11 + m.seed));
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        for (let k=0;k<3;k++){
+          const hx = m.x + Math.cos(m.seed + k*1.9)*44*s;
+          const hy = m.y + Math.sin(m.seed + k*2.3)*30*s;
+          ctx.moveTo(hx, hy-4*s);
+          ctx.lineTo(hx + Math.sin(G.t*7+k)*3*s, hy - (12 + 4*Math.sin(G.t*9+k))*s);
+        }
+        ctx.stroke();
+        break;
+      }
+      case 3: {                                 // ruined keep
+        ctx.lineWidth = 1.5;
+        const w = 78*s, h = 52*s;
+        ctx.beginPath();
+        ctx.rect(m.x-w/2, m.y-h/2, w, h);
+        for (let sx=-1;sx<=1;sx+=2) for (let sy=-1;sy<=1;sy+=2)
+          ctx.rect(m.x + sx*w/2 - 9*s, m.y + sy*h/2 - 9*s, 18*s, 18*s);
+        ctx.stroke();
+        break;
+      }
+      default:                                  // forest
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        for (let k=0;k<22;k++){
+          const tx = m.x + Math.cos(m.seed + k*2.4)*66*s*Math.sqrt((k%7+1)/7);
+          const ty = m.y + Math.sin(m.seed + k*1.7)*44*s;
+          ctx.moveTo(tx-5*s, ty+4*s); ctx.lineTo(tx, ty-5*s); ctx.lineTo(tx+5*s, ty+4*s);
+        }
+        ctx.stroke();
+        break;
+    }
   }
+}
+
+function drawWorld(){
+  const Ls = CFG.WORLD.layers;
+  const a = ridges.active;
+  for (let li=0; li<Ls.length; li++){
+    const L = Ls[li];
+    ctx.strokeStyle = land(L.a);
+    ctx.lineWidth = L.lw;
+    ctx.beginPath();                            // one path for the whole layer
+    for (let i=0;i<a.length;i++){
+      const r = a[i];
+      if (r.li !== li) continue;
+      ctx.moveTo(RIDGE_X[0], r.y + r.ys[0]);
+      for (let k=1;k<RIDGE_N;k++) ctx.lineTo(RIDGE_X[k], r.y + r.ys[k]);
+    }
+    ctx.stroke();
+  }
+  drawMarks();
 }
 
 /* =============================== INPUT ==================================
@@ -856,6 +1072,7 @@ const pools = {
   en  : new Pool(() => ({}), CFG.POOL.enemies),
   par : new Pool(() => ({x:0,y:0,vx:0,vy:0,life:0,max:1,len:3,pur:false}), CFG.POOL.particles),
   flo : new Pool(() => ({x:0,y:0,t:0,txt:'',pur:false}), CFG.POOL.floaters),
+  cor : new Pool(() => ({}), CFG.POOL.corpses),
 };
 
 const P = { x:CFG.W/2, y:CFG.FIELD.bottom-70, hp:100, maxHP:100, damage:10,
@@ -869,7 +1086,7 @@ const G = {
   spawnTimer:2.2,
   boss:null, bossIntro:0, bossWin:0,
   powerTimer:CFG.POWER.cooldown, powerFx:null,
-  shake:0, flash:0, card:null, cardT:0,
+  shake:0, flash:0, freeze:0, card:null, cardT:0,
   hasSave:false, checkpoint:null,
   menuIdx:0, storyT:0, endT:0,
   frameMs:0,
@@ -1075,10 +1292,59 @@ function updateEnemies(dt){
       damagePlayer(CFG.ENEMY.contactDmg * enemyDmgMul());
   }
 }
+/* A killed dragon is not deleted -- it crumples out of the sky, falls away from
+   the camera, hits the ground and then slides off behind Cindu as wreckage.
+   Two states: 0 = falling (amber, in the air), 1 = landed (cool, part of the
+   world). Shrinking IS falling: seen from overhead, receding from the camera is
+   the only direction "down" can be. */
+function spawnCorpse(e){
+  const c = pools.cor.alloc(); if (!c) return;
+  c.art = e.art;
+  c.fr  = ((e.flap|0) % 3 + 3) % 3;          // freeze the wingbeat -- it is dead
+  c.x = e.x; c.y = e.y;
+  c.vx = rnd(70,-70); c.vy = rnd(80, 25);
+  c.rot = e.face || 0;
+  c.spin = rnd(4.4, 1.5) * (Math.random() < 0.5 ? -1 : 1);
+  c.scale = 1; c.t = 0; c.wt = 0; c.state = 0;
+  c.dur = rnd(CFG.FEEL.fallDur[0], CFG.FEEL.fallDur[1]);
+}
+function updateCorpses(dt, boost){
+  const FE = CFG.FEEL, Ls = CFG.WORLD.layers;
+  const ws = CFG.WORLD.speed * (boost === undefined ? 1 : boost) * Ls[Ls.length-1].mul;
+  const a = pools.cor.active;
+  for (let i=a.length-1;i>=0;i--){
+    const c = a[i];
+    if (c.state === 0){
+      c.t += dt;
+      c.vy += FE.gravity * dt;
+      c.vx *= 0.985;
+      c.x += c.vx * dt; c.y += c.vy * dt;
+      c.rot += c.spin * dt;
+      const k = clamp(c.t / c.dur, 0, 1);
+      c.scale = 1 - FE.fallScale * k;
+      if (Math.random() < dt*13) burst(c.x, c.y, 1, 44, Math.random() < 0.35, 3);
+      if (k >= 1){
+        c.state = 1; c.wt = 0;
+        c.y = clamp(c.y, F.top + 10, CFG.H - 24);
+        burst(c.x, c.y, 9, 95, false, 4);
+        Audio2.SFX.impact();
+        G.shake = Math.max(G.shake, 2.2);
+      }
+    } else {
+      c.wt += dt;
+      c.y += ws * dt;                          // it belongs to the landscape now
+      if (c.wt > FE.wreckFade || c.y > CFG.H + 50) pools.cor.release(i);
+    }
+  }
+}
+
 function killEnemy(e, i){
   burst(e.x, e.y, 16, 220, false, 6);
   burst(e.x, e.y, 8, 150, true, 4);
   Audio2.SFX.enemyDie();
+  spawnCorpse(e);
+  G.shake  = Math.max(G.shake, CFG.FEEL.killShake);
+  G.freeze = CFG.FEEL.hitstop;
   pools.en.release(i);
   if (e.minion) return;                 // boss-summoned minions give nothing
   G.kills++;
@@ -1096,6 +1362,10 @@ function damageEnemy(e, i, amount, burnFor){
   e.hp -= amount; e.hitT = 1;
   if (burnFor) e.burn = Math.max(e.burn, burnFor);
   if (e.hp <= 0){ killEnemy(e, i); return true; }
+  // Every dragon takes at least two hits, so without this roughly half of all
+  // the shooting in the game lands in silence.
+  Audio2.SFX.hit();
+  G.shake = Math.max(G.shake, CFG.FEEL.hitShake);
   return false;
 }
 
@@ -1460,7 +1730,8 @@ function startGame(snap){
   P.x = CFG.W/2; P.y = F.bottom - 80; P.dead = false; P.inv = 1.4;
   P.cool = 0; P.hurtFlash = 0;
   G.powerTimer = CFG.POWER.cooldown;
-  G.spawnTimer = 2.4; G.shake = 0; G.flash = 0; G.endT = 0;
+  G.spawnTimer = 0.8; G.shake = 0; G.flash = 0; G.freeze = 0; G.endT = 0;
+  buildWorld();                    // a fresh run flies over fresh ground
   IN.powerEdge = false; IN.pauseEdge = false; IN.tap = null; IN.power = false;
   G.state = 'playing';
   Audio2.setTrack('triumph', G.phase);
@@ -1517,6 +1788,37 @@ function drawEnemies(){
     if (e.maxHP > CFG.ENEMY.hp * 1.4 && e.hp < e.maxHP){       // tough enemies show HP
       bar(e.x-16, e.y + e.r + 8, 32, 3, e.hp/e.maxHP, CFG.PURPLE, amber(0.25));
     }
+  }
+}
+/* Falling bodies draw with the living dragons -- still amber, still airborne.
+   The sprites have their glow baked in by glowStroke, so a corpse cannot be
+   re-tinted; that is fine, because a body only turns cool once it has landed. */
+function drawCorpses(){
+  const a = pools.cor.active;
+  for (let i=0;i<a.length;i++){
+    const c = a[i];
+    if (c.state !== 0) continue;
+    blit(SPR[c.art][c.fr], c.x, c.y, c.rot, 1 - 0.22*(c.t/c.dur), c.scale);
+  }
+}
+/* Wreckage draws with the world: the world's colour, the world's speed. A
+   snapped spine and two collapsed wings -- recognisable as what it was. */
+function drawWrecks(){
+  const a = pools.cor.active;
+  ctx.lineWidth = 1.3;
+  for (let i=0;i<a.length;i++){
+    const c = a[i];
+    if (c.state !== 1) continue;
+    ctx.strokeStyle = land(clamp(1 - c.wt/CFG.FEEL.wreckFade, 0, 1) * 0.8);
+    ctx.save();
+    ctx.translate(c.x, c.y); ctx.rotate(c.rot);
+    const s = 10 * c.scale;
+    ctx.beginPath();
+    ctx.moveTo(0, -1.5*s); ctx.lineTo(0.25*s, 0.2*s); ctx.lineTo(-0.2*s, 1.4*s);
+    ctx.moveTo(0, -0.2*s); ctx.lineTo(-1.5*s, 0.7*s); ctx.lineTo(-0.9*s, 1.15*s);
+    ctx.moveTo(0, -0.2*s); ctx.lineTo( 1.4*s, 0.9*s); ctx.lineTo( 0.8*s, 1.25*s);
+    ctx.stroke();
+    ctx.restore();
   }
 }
 function buildBossSprites(b){
@@ -1798,7 +2100,7 @@ function titleItems(){
 /* ------------------------------- title --------------------------------- */
 let titleDragonY = 322;
 function drawTitle(){
-  drawWind();
+  drawWorld();
   titleDragonY -= 0.45;
   if (titleDragonY < 252) titleDragonY = 322;
   blit(SPR.cindu[((G.t*7)|0)%3], CFG.W/2, titleDragonY, 0, 0.20, 1.2);
@@ -1828,7 +2130,7 @@ function updateTitle(){
 
 /* ------------------------------- story --------------------------------- */
 function drawStory(){
-  drawWind();
+  drawWorld();
   const lead = 26, top = 250 - G.storyT * 22;
   for (let i=0;i<STORY.length;i++){
     const y = top + i*lead;
@@ -1933,14 +2235,19 @@ function updateVictory(dt){
 function step(dt){
   G.t += dt;
   switch (G.state){
-    case 'title':   updateWind(dt, 0.5); updateTitle(); break;
-    case 'story':   updateWind(dt, 0.35); updateStory(dt); break;
+    case 'title':   updateWorld(dt, 0.5); updateTitle(); break;
+    case 'story':   updateWorld(dt, 0.35); updateStory(dt); break;
     case 'paused':  updatePause(); break;
-    case 'dead':    updateWind(dt, 0.25); updateFx(dt); updateDead(dt); break;
-    case 'victory': updateWind(dt, 0.4); updateFx(dt); updateVictory(dt); break;
+    case 'dead':    updateWorld(dt, 0.25); updateCorpses(dt, 0.25);
+                    updateFx(dt); updateDead(dt); break;
+    case 'victory': updateWorld(dt, 0.4); updateFx(dt); updateVictory(dt); break;
     case 'playing':
       if (takePauseEdge()){ G.state = 'paused'; G.menuIdx = 0; Audio2.stopMusic(); break; }
-      updateWind(dt, 1);
+      // Hitstop. The whole simulation holds for a few frames on a kill while
+      // rendering continues, so the frame freezes instead of stuttering.
+      if (G.freeze > 0){ G.freeze -= dt; break; }
+      updateWorld(dt, 1);
+      updateCorpses(dt, 1);
       updatePlayer(dt);
       updateEnemies(dt);
       updateBoss(dt);
@@ -1960,12 +2267,14 @@ function render(){
   ctx.save();
   if (G.shake > 0.2) ctx.translate(rnd(G.shake,-G.shake)*0.5, rnd(G.shake,-G.shake)*0.5);
   if (inGame){
-    drawWind();
+    drawWorld();
+    drawWrecks();          // wreckage sits on the land, under everything alive
     drawEnemies();
     drawBoss();
     drawPowerFx();
     drawBullets();
     drawPlayer();
+    drawCorpses();         // falling bodies pass in front of the living
     drawParticles();
   } else if (G.state === 'title') drawTitle();
   else if (G.state === 'story')  drawStory();
@@ -2005,7 +2314,7 @@ document.addEventListener('visibilitychange', () => {
 
 /* ================================ BOOT ================================= */
 buildSprites();
-buildWind();
+buildWorld();
 resize();
 (function loadSave(){
   const rec = readSave();
@@ -2032,6 +2341,8 @@ window.__CINDU = {
   stats(){ return { state:G.state, kills:G.kills, level:G.level, phase:G.phase,
                     lords:G.lordsKilled, tier:G.powerTier, hp:P.hp, maxHP:P.maxHP,
                     enemies:pools.en.active.length, eb:pools.eb.active.length,
+                    corpses:pools.cor.active.length, ridges:ridges.active.length,
+                    marks:marks.active.length,
                     frameMs:+G.frameMs.toFixed(2) }; },
 };
 </script>
