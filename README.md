@@ -5,8 +5,9 @@ no downloaded assets. Plays on a phone and on a desktop keyboard.
 
 **Play it:** open `index.html` in any modern browser.
 
-**Where next:** see [ROADMAP.md](ROADMAP.md) for the six-stage development plan,
-including every step that needs a tool outside this repository.
+**Where next:** see [ROADMAP.md](ROADMAP.md). The current milestone is making the
+first 30 seconds feel like flight: a scrolling landscape, and dragons that crumple
+and fall into it.
 
 ---
 
