@@ -1988,9 +1988,46 @@ function titleItems(){
    decal, not a dragon. Raise HOVER_BOB for a heavier hover, set it to 0 to
    nail him down completely. */
 const HOVER_BOB = 3;
-function drawCinduHover(y, scale){
-  blit(SPR.cindu[flapFrame(G.t*7, SPR.cindu.length)],
-       CFG.W/2, y + Math.sin(G.t*1.6) * HOVER_BOB, 0, 0.20, scale);
+const HOVER_SPAN = CFG.W - 48;   // wingtip to wingtip, 24px of air either side
+
+/* Sizing him by a hand-picked scale would clip the wings the moment the sprite
+   changes, so take it from the art instead. `blit` squashes a cell into a
+   dim x dim square, so the widest frame's share of its cell is the part of
+   `dim` that actually reaches the screen: the painted sheet nearly fills its
+   cell on the downbeat, while the wireframe fallback carries a lot of glow
+   padding around a narrower dragon. SPAN_ALPHA is what counts as wing -- both
+   sheets fade a soft halo out past the membrane, and measuring that halo would
+   size the dragon by his glow and leave the wings visibly short of the margin.
+   The halo then hangs into the 24px of air, which is what it is there for.
+   Measured once and cached against the frame array, which CINDU_ART swaps under
+   us when the sheet decodes. Opened over file:// the painted cells taint the
+   canvas and getImageData throws -- and only they can, since the wireframes are
+   drawn rather than loaded, so the fallback is that sheet's own measured 1. */
+const SPAN_ALPHA = 32, SPAN_FALLBACK = 1;
+let spanMeasure = { frames:null, frac:SPAN_FALLBACK };
+function cinduSpanFrac(){
+  const frames = SPR.cindu;
+  if (spanMeasure.frames === frames) return spanMeasure.frac;
+  let best = 0;
+  for (const c of frames){
+    let d;
+    try { d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; }
+    catch (e){ best = SPAN_FALLBACK; break; }
+    let x0 = c.width, x1 = -1;
+    for (let y=0;y<c.height;y++){
+      const row = y*c.width;
+      for (let x=0;x<c.width;x++)
+        if (d[(row+x)*4+3] > SPAN_ALPHA){ if (x < x0) x0 = x; if (x > x1) x1 = x; }
+    }
+    if (x1 >= x0) best = Math.max(best, (x1-x0+1) / c.width);
+  }
+  spanMeasure = { frames, frac: best || SPAN_FALLBACK };
+  return spanMeasure.frac;
+}
+function drawCinduHover(y){
+  const spr = SPR.cindu[flapFrame(G.t*7, SPR.cindu.length)];
+  blit(spr, CFG.W/2, y + Math.sin(G.t*1.6) * HOVER_BOB, 0, 0.20,
+       HOVER_SPAN / (spr.dim * cinduSpanFrac()));
 }
 
 /* ------------------------------- start --------------------------------- */
@@ -2001,10 +2038,10 @@ function drawCinduHover(y, scale){
    already unlocked by the time the menu draws. */
 function drawStart(){
   drawWind();
+  drawCinduHover(410);
   glowTxt('C I N D U', CFG.W/2, 150, 44, CFG.AMBER, 'center', 22);
   glowTxt('DRAGON LORD', CFG.W/2, 196, 20, CFG.PURPLE, 'center', 14);
   txt('RECLAIM THE SCATTERED SOUL', CFG.W/2, 232, 12, amber(0.55));
-  drawCinduHover(400, 1.7);
   drawMenu(['START'], 620, 62);
   txt(showPad() ? 'TAP TO BEGIN' : 'PRESS ANY KEY TO BEGIN', CFG.W/2, 690, 12,
       amber(0.4 + 0.3*Math.sin(G.t*3)));
@@ -2022,7 +2059,7 @@ function updateStart(){
 /* ------------------------------- title --------------------------------- */
 function drawTitle(){
   drawWind();
-  drawCinduHover(322, 1.2);
+  drawCinduHover(372);
   glowTxt('C I N D U', CFG.W/2, 150, 44, CFG.AMBER, 'center', 22);
   glowTxt('DRAGON LORD', CFG.W/2, 196, 20, CFG.PURPLE, 'center', 14);
   txt('RECLAIM THE SCATTERED SOUL', CFG.W/2, 232, 12, amber(0.55));

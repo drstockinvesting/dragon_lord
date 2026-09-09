@@ -159,6 +159,16 @@ through the same four painted frames as in flight, but he holds his station,
 with only a 3px bob so he does not read as a decal. `HOVER_BOB` next to
 `drawCinduHover()` is the knob; 0 nails him down completely.
 
+He is sized to fill the screen: at the widest point of the flap the wingtips
+land 24px from each edge (`HOVER_SPAN`). That scale is measured from the art
+rather than picked by hand — `blit` squashes a sprite cell into a `dim`-square,
+so `cinduSpanFrac()` reads the widest frame's share of its cell once and caches
+it. The painted sheet is cut flush at the cell edge on the downbeat; the
+wireframe fallback carries a lot of glow padding around a narrower dragon, and
+would be half the size under a fixed scale. `SPAN_ALPHA` is what counts as wing:
+measuring the soft halo instead of the membrane would size him by his glow and
+leave the wings visibly short.
+
 The vector art was tuned against pure black, so a black scrim sits between the
 backdrop and the action. **`CFG.BACKDROP.dim` is the knob** — raise it toward 1 if
 the amber is ever hard to read, drop it toward 0 to let the landscape through.
