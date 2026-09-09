@@ -1,9 +1,11 @@
 # Cindu: Dragon Lord
 
-A vertical-scrolling dragon shooter. One HTML file, no dependencies, no build step,
-no downloaded assets. Plays on a phone and on a desktop keyboard.
+A vertical-scrolling dragon shooter. One HTML file plus one background image, no
+dependencies, no build step. Plays on a phone and on a desktop keyboard.
 
-**Play it:** open `index.html` in any modern browser.
+**Play it:** open `index.html` in any modern browser. Keep `assets/` next to it —
+without the backdrop the game still runs, just on the black sky it started life
+with.
 
 ---
 
@@ -117,8 +119,23 @@ you back to the last dragon-lord checkpoint, not to zero.
 
 ## Look and sound
 
-Three colours only: black background, amber outlines, purple effects. Every dragon
-is a stroked vector path — no sprites, no images.
+Amber outlines and purple effects over a painted backdrop. Every dragon is still a
+stroked vector path — there are no sprites — but the sky behind them is no longer
+black.
+
+`assets/bg_loop.webp` is a single 1080×2288 tile: snow-capped ridges falling into a
+river valley of patchwork farmland, hedgerows, a village and a stone bridge. It
+scrolls slowly upward behind the wind streaks and wraps seamlessly, so the flight
+never ends. The image was generated locally with ComfyUI and SDXL; the workflows
+and the script that made it live in the `comfyUI-setup` repo under `workflows/` and
+`scripts/generate_backgrounds.py`.
+
+The vector art was tuned against pure black, so a black scrim sits between the
+backdrop and the action. **`CFG.BACKDROP.dim` is the knob** — raise it toward 1 if
+the amber is ever hard to read, drop it toward 0 to let the landscape through.
+`speed` sets the parallax (the wind moves at 110–410, the ground at 46) and
+`tileH` is the tile's height in virtual units, which must match the image's real
+height halved.
 
 All audio is synthesised at runtime with Web Audio oscillators and filtered noise:
 a driving major-key loop for regular waves, a minor-key tritone drone for boss
@@ -142,6 +159,9 @@ Technical notes worth knowing before editing:
 
 - The virtual resolution is a fixed 540×960, scaled to fit with letterboxing, so
   gameplay is identical on every screen. Device pixel ratio is capped at 2.
+- The backdrop blits only the visible slice of each tile rather than the whole
+  1080×2288 texture, and everything in the `BACKDROP` module is a no-op until the
+  image decodes — a missing or broken asset costs nothing and breaks nothing.
 - Dragons are pre-rendered once into offscreen canvases with their glow baked in,
   then blitted. Running `shadowBlur` per stroke per frame is what kills framerate
   on a phone.
