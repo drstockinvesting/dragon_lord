@@ -167,7 +167,9 @@ it. The painted sheet is cut flush at the cell edge on the downbeat; the
 wireframe fallback carries a lot of glow padding around a narrower dragon, and
 would be half the size under a fixed scale. `SPAN_ALPHA` is what counts as wing:
 measuring the soft halo instead of the membrane would size him by his glow and
-leave the wings visibly short.
+leave the wings visibly short. `HOVER_ALPHA` fades him: 0.20 on the start
+screen, 0.12 on the menu, where four buttons and a line of status text lie
+across him and he is a watermark rather than the subject.
 
 The vector art was tuned against pure black, so a black scrim sits between the
 backdrop and the action. **`CFG.BACKDROP.dim` is the knob** — raise it toward 1 if

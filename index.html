@@ -1989,6 +1989,10 @@ function titleItems(){
    nail him down completely. */
 const HOVER_BOB = 3;
 const HOVER_SPAN = CFG.W - 48;   // wingtip to wingtip, 24px of air either side
+// He is a watermark, not a subject, and the menu has four buttons and a line of
+// status text lying across him -- so he sits fainter there than on the start
+// screen, which has one button and nothing to read.
+const HOVER_ALPHA = { start:0.20, title:0.12 };
 
 /* Sizing him by a hand-picked scale would clip the wings the moment the sprite
    changes, so take it from the art instead. `blit` squashes a cell into a
@@ -2024,9 +2028,9 @@ function cinduSpanFrac(){
   spanMeasure = { frames, frac: best || SPAN_FALLBACK };
   return spanMeasure.frac;
 }
-function drawCinduHover(y){
+function drawCinduHover(y, alpha){
   const spr = SPR.cindu[flapFrame(G.t*7, SPR.cindu.length)];
-  blit(spr, CFG.W/2, y + Math.sin(G.t*1.6) * HOVER_BOB, 0, 0.20,
+  blit(spr, CFG.W/2, y + Math.sin(G.t*1.6) * HOVER_BOB, 0, alpha,
        HOVER_SPAN / (spr.dim * cinduSpanFrac()));
 }
 
@@ -2038,7 +2042,7 @@ function drawCinduHover(y){
    already unlocked by the time the menu draws. */
 function drawStart(){
   drawWind();
-  drawCinduHover(410);
+  drawCinduHover(410, HOVER_ALPHA.start);
   glowTxt('C I N D U', CFG.W/2, 150, 44, CFG.AMBER, 'center', 22);
   glowTxt('DRAGON LORD', CFG.W/2, 196, 20, CFG.PURPLE, 'center', 14);
   txt('RECLAIM THE SCATTERED SOUL', CFG.W/2, 232, 12, amber(0.55));
@@ -2059,7 +2063,7 @@ function updateStart(){
 /* ------------------------------- title --------------------------------- */
 function drawTitle(){
   drawWind();
-  drawCinduHover(372);
+  drawCinduHover(372, HOVER_ALPHA.title);
   glowTxt('C I N D U', CFG.W/2, 150, 44, CFG.AMBER, 'center', 22);
   glowTxt('DRAGON LORD', CFG.W/2, 196, 20, CFG.PURPLE, 'center', 14);
   txt('RECLAIM THE SCATTERED SOUL', CFG.W/2, 232, 12, amber(0.55));
