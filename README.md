@@ -197,6 +197,12 @@ the two things the source file cannot do for itself:
   sheet is refetched instead of being served from a stale browser cache.
 
 `_site/` is generated and git-ignored. Build it locally the same way CI does with
-`python3 scripts/build-site.py`. Pages requires the repository to be public; the
-workflow enables Pages itself on its first successful run, so there is no
-settings page to visit by hand.
+`python3 scripts/build-site.py`.
+
+Pages needs two one-time settings before the workflow can succeed, both requiring
+repository admin: the repository must be **public**, and **Settings → Pages →
+Build and deployment → Source** must be set to **GitHub Actions**. Neither can be
+done from the workflow — `configure-pages` accepts an `enablement: true` input
+that calls the create-a-Pages-site API, but the Actions `GITHUB_TOKEN` is refused
+("Resource not accessible by integration") whatever `permissions:` it is given.
+Once those two are set, every push to `main` deploys with no further intervention.

@@ -3,9 +3,18 @@
 #
 #     https://drstockinvesting.github.io/dragon_lord/
 #
-# Nothing here needs a secret. The repository must be public for Pages to be
-# available; `enablement: true` below turns Pages on the first time this runs,
-# so there is no settings page to visit by hand.
+# Nothing here needs a secret, but Pages does need two things done once, by a
+# human with admin rights, before this workflow can succeed:
+#
+#   1. the repository must be public;
+#   2. Settings -> Pages -> Build and deployment -> Source must be "GitHub Actions".
+#
+# Step 2 cannot be automated from here. configure-pages does take an
+# `enablement: true` input that calls the create-a-Pages-site API, but the
+# Actions GITHUB_TOKEN is not permitted to create a Pages site no matter what
+# `permissions:` grants it -- it fails with "Resource not accessible by
+# integration". So the input is not used, and this workflow assumes Pages is
+# already switched on.
 name: Deploy game to GitHub Pages
 
 on:
@@ -37,8 +46,6 @@ jobs:
           fetch-depth: 0
 
       - uses: actions/configure-pages@v5
-        with:
-          enablement: true
 
       - name: Build _site
         run: python3 scripts/build-site.py
