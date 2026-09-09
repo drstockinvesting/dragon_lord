@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="theme-color" content="#000000">
 <meta name="description" content="Cindu: Dragon Lord - a vertical-scrolling dragon shooter.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23000'/%3E%3Cpath d='M6 20c3-8 8-11 10-14 2 3 7 6 10 14-4-3-7-4-10-4s-6 1-10 4z' fill='none' stroke='%23FFB000' stroke-width='2.2' stroke-linejoin='round'/%3E%3Ccircle cx='16' cy='23' r='2.4' fill='%239B5DE5'/%3E%3C/svg%3E">
 <title>Cindu: Dragon Lord</title>
 <style>
   *{margin:0;padding:0;box-sizing:border-box}
@@ -34,6 +35,11 @@
    Sections: CONFIG / UTIL / AUDIO / SPRITES / INPUT / ENTITIES /
              PROGRESSION / BOSSES / POWER / HUD / SCREENS / LOOP
    ========================================================================= */
+
+/* The deploy build stamps this so the title screen can prove which version the
+   live link just served. Left as 'dev' when the file is opened straight from
+   disk -- scripts/build-site.py is the only thing that rewrites it. */
+const BUILD = 'dev';
 
 /* ============================== CONFIG ================================== */
 const CFG = {
@@ -1901,6 +1907,7 @@ function drawTitle(){
     : 'WASD OR ARROWS   -   SPACE FIRE   -   ENTER POWER';
   txt(help, CFG.W/2, CFG.H-92, 11, amber(0.42));
   txt('P PAUSE   -   M MUTE', CFG.W/2, CFG.H-70, 11, amber(0.28));
+  txt('BUILD ' + BUILD, CFG.W/2, CFG.H-46, 9, amber(0.22));
 }
 function updateTitle(){
   menuInput(i => {

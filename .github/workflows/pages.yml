@@ -1,0 +1,51 @@
+# Publishes the game to GitHub Pages on every push to main, so the play link
+# stays the same URL forever and always serves the latest merged version:
+#
+#     https://drstockinvesting.github.io/dragon_lord/
+#
+# Nothing here needs a secret. The repository must be public for Pages to be
+# available; `enablement: true` below turns Pages on the first time this runs,
+# so there is no settings page to visit by hand.
+name: Deploy game to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Let a run in progress finish rather than cancelling it -- a half-applied
+# deploy would leave the live link serving nothing.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # build-site.py reads the commit date and sha for the build stamp.
+          fetch-depth: 0
+
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: Build _site
+        run: python3 scripts/build-site.py
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

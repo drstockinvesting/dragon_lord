@@ -1,11 +1,22 @@
 # Cindu: Dragon Lord
 
-A vertical-scrolling dragon shooter. One HTML file plus one background image, no
-dependencies, no build step. Plays on a phone and on a desktop keyboard.
+A vertical-scrolling dragon shooter. One HTML file plus two images, no
+dependencies and nothing to build in order to play it. Works on a phone and on a
+desktop keyboard.
 
-**Play it:** open `index.html` in any modern browser. Keep `assets/` next to it —
-without the backdrop the game still runs, just on the black sky it started life
-with.
+## Play it
+
+**https://drstockinvesting.github.io/dragon_lord/**
+
+Bookmark that. It is the same URL forever, and it always serves whatever is
+merged to `main` — every push to `main` redeploys it, usually within a minute or
+two. The title screen prints the build date and commit at the bottom, so you can
+always tell which version you just got. Your saved run lives in the browser's
+`localStorage` for that URL, so progress survives every update.
+
+To run it from a checkout instead, open `index.html` in any modern browser and
+keep `assets/` next to it — without the backdrop the game still runs, just on the
+black sky it started life with.
 
 ---
 
@@ -173,3 +184,19 @@ Technical notes worth knowing before editing:
   notes straight off `setTimeout` drifts audibly.
 - `window.__CINDU` exposes a debug hook (`jump`, `summon`, `power`, `stats`) used
   by the automated playtests.
+
+### Deploying
+
+`.github/workflows/pages.yml` runs on every push to `main` and publishes to
+GitHub Pages. It calls `scripts/build-site.py`, which assembles `_site/` and does
+the two things the source file cannot do for itself:
+
+- rewrites `const BUILD = 'dev'` to the commit date and short sha, which is what
+  the title screen shows;
+- appends a content hash to each `assets/` URL, so a changed backdrop or sprite
+  sheet is refetched instead of being served from a stale browser cache.
+
+`_site/` is generated and git-ignored. Build it locally the same way CI does with
+`python3 scripts/build-site.py`. Pages requires the repository to be public; the
+workflow enables Pages itself on its first successful run, so there is no
+settings page to visit by hand.
