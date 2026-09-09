@@ -1,8 +1,8 @@
 # Cindu: Dragon Lord
 
-A vertical-scrolling dragon shooter. One HTML file plus two images, no
-dependencies and nothing to build in order to play it. Works on a phone and on a
-desktop keyboard.
+A vertical-scrolling dragon shooter. One HTML file plus two images and a music
+loop, no dependencies and nothing to build in order to play it. Works on a phone
+and on a desktop keyboard.
 
 ## Play it
 
@@ -175,10 +175,18 @@ and out of the menu is covered by construction.
 It plays as one looping buffer on the same `musBus` as everything else, so
 `SOUND: ON/OFF` and the `M` key gate it identically — and because muting drops the
 bus rather than stopping the source, unmuting returns you to the chant where it
-would have been, not to the top. Loading is lazy: decoding needs a live
-`AudioContext`, which only exists after a user gesture, so the fetch starts on the
-first frame the menu both wants music and is allowed it. A failed load latches and
-is never retried.
+would have been, not to the top.
+
+The bytes are fetched at boot, but the chant still cannot begin until you press
+a key or click: every browser refuses to start audio before a user gesture, and
+no amount of preloading changes that. So the two halves are split. `fetch` needs
+no `AudioContext` and runs immediately; only `decodeAudioData` and playback wait
+for the gesture. Without that split the first key press paid for a 480KB
+download before a note sounded, which reads as broken rather than loading. The
+title screen says **PRESS ANY KEY FOR SOUND** until it is singing, so a silent
+menu is explained instead of merely silent. A failed load latches and is never
+retried -- `decodeAudioData` detaches its buffer, so there is nothing left to
+retry with.
 
 Stable Audio 3's Community License requires registration for commercial use.
 

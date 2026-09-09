@@ -476,15 +476,28 @@ const Audio2 = (function(){
      both wants music and can legally have it. A failed load latches 'failed'
      and is never retried -- a missing file leaves the menu silent and costs
      nothing else, the same bargain BACKDROP and CINDU_ART make. */
-  const menu = { buf:null, src:null, gain:null, state:'idle' };
+  const menu = { bytes:null, buf:null, src:null, gain:null, state:'idle' };
 
-  function menuLoad(){
-    menu.state = 'loading';
+  /* Fetching needs no AudioContext -- only decodeAudioData does. So the bytes
+     come down at boot, and only the decode waits for a gesture. Before this
+     split, the first key press paid for a 480KB download before a note
+     sounded, which read as "the music is broken" rather than "the music is
+     loading". State runs idle -> fetching -> fetched -> decoding -> ready. */
+  function menuPrefetch(){
+    if (menu.state !== 'idle') return;
+    menu.state = 'fetching';
     fetch(CFG.MENU_MUSIC.src)
       .then(r => r.ok ? r.arrayBuffer() : Promise.reject(r.status))
-      .then(b => ctx.decodeAudioData(b))
-      .then(buf => { menu.buf = buf; menu.state = 'ready'; })
+      .then(b => { menu.bytes = b; menu.state = 'fetched'; })
       .catch(() => { menu.state = 'failed'; });
+  }
+  function menuDecode(){
+    menu.state = 'decoding';
+    // decodeAudioData detaches the buffer, so there is nothing to retry with
+    // on failure -- which is why 'failed' latches rather than looping.
+    ctx.decodeAudioData(menu.bytes)
+      .then(buf => { menu.buf = buf; menu.bytes = null; menu.state = 'ready'; })
+      .catch(() => { menu.bytes = null; menu.state = 'failed'; });
   }
   function menuStart(){
     if (menu.src || !menu.buf) return;                  // already singing
@@ -514,7 +527,8 @@ const Audio2 = (function(){
   function menuMusic(on){
     if (!on){ menuStop(); return; }
     if (!ready || !ctx || ctx.state !== 'running') return;   // pre-gesture: wait
-    if (menu.state === 'idle') menuLoad();
+    if (menu.state === 'idle') menuPrefetch();      // gesture beat the network
+    else if (menu.state === 'fetched') menuDecode();
     else if (menu.state === 'ready') menuStart();
   }
 
@@ -524,7 +538,7 @@ const Audio2 = (function(){
     if (k==='music') musBus.gain.setTargetAtTime(v?0.34:0, now(), 0.05);
     if (k==='sfx')   sfxBus.gain.setTargetAtTime(v?0.9:0,  now(), 0.05);
   }
-  return { unlock, SFX, setTrack, stopMusic, menuMusic, setOpt, opt,
+  return { unlock, SFX, setTrack, stopMusic, menuMusic, menuPrefetch, setOpt, opt,
            get ready(){ return ready; },
            get menuState(){ return menu.state; },
            get menuPlaying(){ return !!menu.src; } };
@@ -958,6 +972,11 @@ function endPointer(e){
 cv.addEventListener('pointerup', e => { e.preventDefault(); endPointer(e); }, { passive:false });
 cv.addEventListener('pointercancel', e => endPointer(e), { passive:false });
 cv.addEventListener('contextmenu', e => e.preventDefault());
+// The canvas is letterboxed, so on a desktop window most of the page is margin
+// around it. A click out there is still a user gesture, and the audio unlock
+// should take it -- otherwise the first thing a mouse user clicks can do
+// nothing at all. Listen-only: no preventDefault, so it changes nothing else.
+window.addEventListener('pointerdown', () => Audio2.unlock(), { passive:true });
 
 function showPad(){ return IN.touchSeen || IS_TOUCH; }
 function takeTap(){ const t = IN.tap; IN.tap = null; return t; }
@@ -1970,6 +1989,12 @@ function drawTitle(){
   glowTxt('DRAGON LORD', CFG.W/2, 196, 20, CFG.PURPLE, 'center', 14);
   txt('RECLAIM THE SCATTERED SOUL', CFG.W/2, 232, 12, amber(0.55));
   drawMenu(titleItems(), 400, 62);
+  // Browsers refuse to start audio before a user gesture, so the chant cannot
+  // begin on load however early the bytes arrive. Say so, rather than leaving a
+  // silent menu looking broken -- it clears itself the moment it sings.
+  if (Audio2.opt.music && !Audio2.menuPlaying)
+    txt('PRESS ANY KEY FOR SOUND', CFG.W/2, 566, 12,
+        purple(0.5 + 0.35*Math.sin(G.t*3.2)));
   const help = showPad()
     ? 'STICK TO FLY   -   FIRE / POWER PADS'
     : 'WASD OR ARROWS   -   SPACE FIRE   -   ENTER POWER';
@@ -2180,6 +2205,7 @@ buildSprites();
 buildWind();
 BACKDROP.load();
 CINDU_ART.load();
+Audio2.menuPrefetch();      // bytes now, decode on the first gesture
 resize();
 (function loadSave(){
   const rec = readSave();
