@@ -68,6 +68,11 @@ const CFG = {
 
   POOL: { pBullets:220, eBullets:420, enemies:48, particles:700, floaters:24 },
 
+  // Painted backdrop tile (assets/bg_loop.webp). It loops vertically; `tileH`
+  // is its height in virtual units, `dim` is the black scrim between it and
+  // the action. Raise `dim` if the amber ever gets hard to read.
+  BACKDROP: { src:'assets/bg_loop.webp', tileH:1144, speed:46, dim:0.55 },
+
   SAVE_KEY: 'cindu_dragon_lord_save_v1',
   OPT_KEY:  'cindu_dragon_lord_opts_v1',
 };
@@ -673,6 +678,7 @@ function buildWind(){
     WIND.push({ x:rnd(CFG.W), y:rnd(CFG.H), len:rnd(46,10), sp:rnd(1,0.25) });
 }
 function updateWind(dt, boost){
+  BACKDROP.advance(dt, boost);
   for (const w of WIND){
     w.y += (110 + w.sp*300) * (boost||1) * dt;
     if (w.y - w.len > CFG.H){ w.y = -rnd(40); w.x = rnd(CFG.W); w.len = rnd(46,10); }
@@ -685,6 +691,44 @@ function drawWind(){
     ctx.beginPath(); ctx.moveTo(w.x, w.y); ctx.lineTo(w.x, w.y + w.len); ctx.stroke();
   }
 }
+
+/* --------------------------- painted backdrop --------------------------- */
+/* One tile, looping vertically, drawn under everything else. Every method is
+   a no-op until the image has decoded and stays one if it never does, so a
+   missing or failed asset leaves exactly the black field the game shipped
+   with rather than breaking the frame. */
+const BACKDROP = {
+  img:null, ready:false, y:0,
+  load(){
+    const im = new Image();
+    const ok = () => { BACKDROP.img = im; BACKDROP.ready = true; };
+    // decode() off the main thread; otherwise the first frame that touches a
+    // 1080x2288 texture stalls.
+    if (im.decode) { im.onload = () => im.decode().then(ok, ok); }
+    else           { im.onload = ok; }
+    im.onerror = () => {};              // stay black, say nothing
+    im.src = CFG.BACKDROP.src;
+  },
+  advance(dt, boost){
+    if (!BACKDROP.ready) return;
+    const th = CFG.BACKDROP.tileH;
+    BACKDROP.y = (BACKDROP.y + CFG.BACKDROP.speed * (boost || 1) * dt) % th;
+  },
+  draw(){
+    if (!BACKDROP.ready) return;
+    const im = BACKDROP.img, th = CFG.BACKDROP.tileH, sc = im.height / th;
+    // Blit only the visible slice of each tile. Handing drawImage the whole
+    // texture twice a frame is a fill-rate tax a phone cannot pay.
+    for (let vy = BACKDROP.y - th; vy < CFG.H; vy += th){
+      const top = Math.max(vy, 0), bot = Math.min(vy + th, CFG.H);
+      if (bot <= top) continue;
+      ctx.drawImage(im, 0, (top - vy) * sc, im.width, (bot - top) * sc,
+                        0, top, CFG.W, bot - top);
+    }
+    ctx.fillStyle = 'rgba(0,0,0,' + CFG.BACKDROP.dim + ')';
+    ctx.fillRect(0, 0, CFG.W, CFG.H);
+  },
+};
 
 /* =============================== INPUT ==================================
    Pointer Events with per-pointerId tracking, so the stick and the fire
@@ -1955,6 +1999,7 @@ function step(dt){
 function render(){
   ctx.fillStyle = CFG.BG;
   ctx.fillRect(0, 0, CFG.W, CFG.H);
+  BACKDROP.draw();
   const inGame = G.state === 'playing' || G.state === 'paused' ||
                  G.state === 'dead' || G.state === 'victory';
   ctx.save();
@@ -2006,6 +2051,7 @@ document.addEventListener('visibilitychange', () => {
 /* ================================ BOOT ================================= */
 buildSprites();
 buildWind();
+BACKDROP.load();
 resize();
 (function loadSave(){
   const rec = readSave();
