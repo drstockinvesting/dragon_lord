@@ -18,6 +18,15 @@ To run it from a checkout instead, open `index.html` in any modern browser and
 keep `assets/` next to it — without the backdrop the game still runs, just on the
 black sky it started life with.
 
+One caveat if you open the file directly: the title music is the only asset the
+game reads with `fetch`, and browsers refuse `fetch` on `file://` URLs. Opened by
+double-click the menu is simply silent — nothing else is affected. To hear it,
+serve the folder:
+
+```sh
+python3 -m http.server 8000     # then open http://localhost:8000
+```
+
 ---
 
 ## The tale
@@ -148,11 +157,30 @@ the amber is ever hard to read, drop it toward 0 to let the landscape through.
 `tileH` is the tile's height in virtual units, which must match the image's real
 height halved.
 
-All audio is synthesised at runtime with Web Audio oscillators and filtered noise:
-a driving major-key loop for regular waves, a minor-key tritone drone for boss
-rounds, and effects for firing, power attacks, enemy deaths, Cindu's death, lord
-spawns, boss victories, level-ups and menu selections. It is honestly retro — this
-is chiptune, not an orchestra.
+Gameplay audio is synthesised at runtime with Web Audio oscillators and filtered
+noise: a driving major-key loop for regular waves, a minor-key tritone drone for
+boss rounds, and effects for firing, power attacks, enemy deaths, Cindu's death,
+lord spawns, boss victories, level-ups and menu selections. It is honestly retro —
+this is chiptune, not an orchestra.
+
+The one exception is `assets/menu_loop.m4a`, the title music: a 30.000s dark
+Gregorian chant loop — low male choir over an organ drone at about 72 Hz, with a
+slow funeral bell — generated with Stable Audio 3 and cut to an exact seamless
+loop with a two-second equal-power crossfade. It plays across the title screen
+*and* the scrolling tale, then fades out over 0.35s the moment `startGame()` makes
+Cindu playable, handing off to the synth tracks. That rule is stated once, at the
+top of `step()`, rather than toggled at each screen transition, so every route in
+and out of the menu is covered by construction.
+
+It plays as one looping buffer on the same `musBus` as everything else, so
+`SOUND: ON/OFF` and the `M` key gate it identically — and because muting drops the
+bus rather than stopping the source, unmuting returns you to the chant where it
+would have been, not to the top. Loading is lazy: decoding needs a live
+`AudioContext`, which only exists after a user gesture, so the fetch starts on the
+first frame the menu both wants music and is allowed it. A failed load latches and
+is never retried.
+
+Stable Audio 3's Community License requires registration for commercial use.
 
 ---
 
@@ -182,6 +210,11 @@ Technical notes worth knowing before editing:
   tab cannot spiral.
 - Music is scheduled with a lookahead against `AudioContext.currentTime`; firing
   notes straight off `setTimeout` drifts audibly.
+- The menu loop sets `loopStart`/`loopEnd` explicitly from `CFG.MENU_MUSIC`
+  instead of trusting `buffer.duration`. Chrome trims the AAC encoder padding
+  exactly, but a decoder that leaves it on would play those frames as a gap at
+  the seam. Prefer `.m4a` over `.mp3` here for the same reason — MP3's padding is
+  guaranteed and decodes as silence at both ends.
 - `window.__CINDU` exposes a debug hook (`jump`, `summon`, `power`, `stats`) used
   by the automated playtests.
 
