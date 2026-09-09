@@ -929,7 +929,10 @@ cv.addEventListener('pointerdown', e => {
   const p = toGame(e.clientX, e.clientY);
   cv.setPointerCapture && cv.setPointerCapture(e.pointerId);
 
-  if (showPad()){
+  // The pad only exists while Cindu is flying. Gating on showPad() alone let
+  // the invisible stick zone (the whole lower left) swallow taps on any menu
+  // button that reaches down there -- START sits squarely inside it.
+  if (showPad() && G.state === 'playing'){
     if (inCircle(p, PAD.fire) && IN.fireId < 0){ IN.fireId = e.pointerId; IN.fire = true; return; }
     if (inCircle(p, PAD.power) && IN.powerId < 0){
       IN.powerId = e.pointerId; IN.power = true; IN.powerEdge = true; return;
@@ -1044,7 +1047,7 @@ const P = { x:CFG.W/2, y:CFG.FIELD.bottom-70, hp:100, maxHP:100, damage:10,
             fireRate:2.5, cool:0, inv:0, flap:0, dead:false, hurtFlash:0 };
 
 const G = {
-  state:'title',              // title | story | playing | dead | victory | paused | options
+  state:'start',              // start | title | story | playing | dead | victory | paused
   t:0, dt:0,
   kills:0, shards:0, souls:0, level:1, lordsKilled:0, powerTier:0, powerUses:0,
   phase:1,
@@ -1977,24 +1980,64 @@ function titleItems(){
   return it;
 }
 
-/* ------------------------------- title --------------------------------- */
-let titleDragonY = 322;
-function drawTitle(){
-  drawWind();
-  titleDragonY -= 0.45;
-  if (titleDragonY < 252) titleDragonY = 322;
+/* --------------------------- Cindu, on station -------------------------- */
+/* On the start and title screens Cindu hovers: the wings beat, but he holds
+   his position. He used to drift up the screen and snap back to the bottom of
+   the run, which read as a loop glitch rather than as flight. The only motion
+   left is a small vertical bob -- a sprite pinned to an exact pixel reads as a
+   decal, not a dragon. Raise HOVER_BOB for a heavier hover, set it to 0 to
+   nail him down completely. */
+const HOVER_BOB = 3;
+function drawCinduHover(y, scale){
   blit(SPR.cindu[flapFrame(G.t*7, SPR.cindu.length)],
-       CFG.W/2, titleDragonY, 0, 0.20, 1.2);
+       CFG.W/2, y + Math.sin(G.t*1.6) * HOVER_BOB, 0, 0.20, scale);
+}
+
+/* ------------------------------- start --------------------------------- */
+/* Nothing but the name, the dragon and one button. It exists for the audio:
+   every browser refuses to start sound before a user gesture, so without this
+   screen the menu opened silent and stayed that way until the player happened
+   to touch something. Pressing START is that gesture, which means the chant is
+   already unlocked by the time the menu draws. */
+function drawStart(){
+  drawWind();
   glowTxt('C I N D U', CFG.W/2, 150, 44, CFG.AMBER, 'center', 22);
   glowTxt('DRAGON LORD', CFG.W/2, 196, 20, CFG.PURPLE, 'center', 14);
   txt('RECLAIM THE SCATTERED SOUL', CFG.W/2, 232, 12, amber(0.55));
-  drawMenu(titleItems(), 400, 62);
-  // Browsers refuse to start audio before a user gesture, so the chant cannot
-  // begin on load however early the bytes arrive. Say so, rather than leaving a
-  // silent menu looking broken -- it clears itself the moment it sings.
-  if (Audio2.opt.music && !Audio2.menuPlaying)
-    txt('PRESS ANY KEY FOR SOUND', CFG.W/2, 566, 12,
-        purple(0.5 + 0.35*Math.sin(G.t*3.2)));
+  drawCinduHover(400, 1.7);
+  drawMenu(['START'], 620, 62);
+  txt(showPad() ? 'TAP TO BEGIN' : 'PRESS ANY KEY TO BEGIN', CFG.W/2, 690, 12,
+      amber(0.4 + 0.3*Math.sin(G.t*3)));
+  txt('BUILD ' + BUILD, CFG.W/2, CFG.H-46, 9, amber(0.22));
+}
+function updateStart(){
+  const t = takeTap();
+  // Any key and any tap open the menu -- the button is the affordance, not a
+  // target to hit. M is the exception: muting is not a request to move on.
+  if (!t || t.key === 'm') return;
+  Audio2.SFX.select();
+  G.state = 'title'; G.menuIdx = 0;
+}
+
+/* ------------------------------- title --------------------------------- */
+function drawTitle(){
+  drawWind();
+  drawCinduHover(322, 1.2);
+  glowTxt('C I N D U', CFG.W/2, 150, 44, CFG.AMBER, 'center', 22);
+  glowTxt('DRAGON LORD', CFG.W/2, 196, 20, CFG.PURPLE, 'center', 14);
+  txt('RECLAIM THE SCATTERED SOUL', CFG.W/2, 232, 12, amber(0.55));
+  const items = titleItems();
+  drawMenu(items, 400, 62);
+  // The gesture is spent on START, so by here the chant is either singing or
+  // still coming down the wire. Say which, rather than leaving a silent menu
+  // looking broken; a failed fetch is latched and never retried, so that one
+  // says so instead of promising sound that will never arrive.
+  if (Audio2.opt.music && !Audio2.menuPlaying){
+    const lost = Audio2.menuState === 'failed';
+    txt(lost ? 'THE CHANT IS LOST' : 'THE CHANT IS RISING...',
+        CFG.W/2, 400 + (items.length-1)*62 + 52, 12,
+        lost ? amber(0.32) : purple(0.5 + 0.35*Math.sin(G.t*3.2)));
+  }
   const help = showPad()
     ? 'STICK TO FLY   -   FIRE / POWER PADS'
     : 'WASD OR ARROWS   -   SPACE FIRE   -   ENTER POWER';
@@ -2126,9 +2169,12 @@ function step(dt){
   // route in and out is covered by construction. It owns title AND story --
   // dismissing the menu into the scrolling tale must not break the loop --
   // and ends only where startGame() flips us to 'playing', which is the
-  // moment Cindu becomes playable.
+  // moment Cindu becomes playable. The start screen is deliberately outside
+  // it: no gesture has happened yet, so nothing could sound there anyway, and
+  // the chant is meant to open the menu.
   Audio2.menuMusic(G.state === 'title' || G.state === 'story');
   switch (G.state){
+    case 'start':   updateWind(dt, 0.5); updateStart(); break;
     case 'title':   updateWind(dt, 0.5); updateTitle(); break;
     case 'story':   updateWind(dt, 0.35); updateStory(dt); break;
     case 'paused':  updatePause(); break;
@@ -2164,7 +2210,8 @@ function render(){
     drawBullets();
     drawPlayer();
     drawParticles();
-  } else if (G.state === 'title') drawTitle();
+  } else if (G.state === 'start') drawStart();
+  else if (G.state === 'title')  drawTitle();
   else if (G.state === 'story')  drawStory();
   ctx.restore();
 
