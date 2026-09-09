@@ -79,6 +79,16 @@ const CFG = {
   // high-density screen.
   CINDU: { src:'assets/cindu_fly.webp', frames:4, dim:116 },
 
+  // Title/story music (assets/menu_loop.m4a): a 30.000s dark chant loop, the
+  // one thing in the game that is a recorded file rather than synthesised.
+  // `loopEnd` is the authored length in seconds, stated here rather than taken
+  // from buffer.duration: Chrome trims AAC encoder padding exactly, but a
+  // decoder that leaves it on would loop those extra frames as a gap. `fade`
+  // is the seconds taken to duck out when Cindu becomes playable; a hard stop
+  // on a sustained drone clicks. Same contract as BACKDROP: if the file is
+  // missing, nothing here ever runs and the menu is simply silent.
+  MENU_MUSIC: { src:'assets/menu_loop.m4a', loopEnd:30.0, fade:0.35 },
+
   SAVE_KEY: 'cindu_dragon_lord_save_v1',
   OPT_KEY:  'cindu_dragon_lord_opts_v1',
 };
@@ -446,14 +456,72 @@ const Audio2 = (function(){
     track = null;
     if (timer){ clearInterval(timer); timer = null; }
   }
+
+  /* -- menu music ------------------------------------------------------- */
+  /* The tracks above are synthesised note by note; this one is a recorded
+     loop (CFG.MENU_MUSIC) playing as a single buffer. It hangs off the same
+     musBus, so SOUND: ON/OFF and the M key gate it exactly like the rest --
+     the buffer keeps running while muted, so unmuting drops you back into the
+     chant in the right place instead of restarting it.
+
+     Loading is lazy and happens at most once. That is not an optimisation:
+     decoding needs a live ctx, and ctx only exists after unlock() has run
+     inside a user gesture, so the fetch starts on the first frame the menu
+     both wants music and can legally have it. A failed load latches 'failed'
+     and is never retried -- a missing file leaves the menu silent and costs
+     nothing else, the same bargain BACKDROP and CINDU_ART make. */
+  const menu = { buf:null, src:null, gain:null, state:'idle' };
+
+  function menuLoad(){
+    menu.state = 'loading';
+    fetch(CFG.MENU_MUSIC.src)
+      .then(r => r.ok ? r.arrayBuffer() : Promise.reject(r.status))
+      .then(b => ctx.decodeAudioData(b))
+      .then(buf => { menu.buf = buf; menu.state = 'ready'; })
+      .catch(() => { menu.state = 'failed'; });
+  }
+  function menuStart(){
+    if (menu.src || !menu.buf) return;                  // already singing
+    const g = ctx.createGain(); g.gain.value = 1;
+    const s = ctx.createBufferSource();
+    s.buffer = menu.buf;
+    s.loop = true;
+    s.loopStart = 0;
+    // Explicit end rather than buffer.duration, so any AAC padding a decoder
+    // leaves on cannot creep into the loop as a gap. Clamped in case a decoder
+    // hands back a buffer shorter than the authored length.
+    s.loopEnd = Math.min(CFG.MENU_MUSIC.loopEnd, menu.buf.duration);
+    s.connect(g); g.connect(musBus);
+    s.start();
+    menu.src = s; menu.gain = g;
+  }
+  function menuStop(){
+    if (!menu.src) return;
+    const s = menu.src, g = menu.gain, t = now(), f = CFG.MENU_MUSIC.fade;
+    menu.src = null; menu.gain = null;                  // detach before the tail
+    g.gain.setValueAtTime(g.gain.value, t);
+    g.gain.linearRampToValueAtTime(0, t + f);
+    s.stop(t + f);
+    s.onended = () => { try{ s.disconnect(); g.disconnect(); }catch(e){} };
+  }
+  // Called every frame with "should the menu be singing right now?".
+  function menuMusic(on){
+    if (!on){ menuStop(); return; }
+    if (!ready || !ctx || ctx.state !== 'running') return;   // pre-gesture: wait
+    if (menu.state === 'idle') menuLoad();
+    else if (menu.state === 'ready') menuStart();
+  }
+
   function setOpt(k,v){
     opt[k]=v; save();
     if (!ready) return;
     if (k==='music') musBus.gain.setTargetAtTime(v?0.34:0, now(), 0.05);
     if (k==='sfx')   sfxBus.gain.setTargetAtTime(v?0.9:0,  now(), 0.05);
   }
-  return { unlock, SFX, setTrack, stopMusic, setOpt, opt,
-           get ready(){ return ready; } };
+  return { unlock, SFX, setTrack, stopMusic, menuMusic, setOpt, opt,
+           get ready(){ return ready; },
+           get menuState(){ return menu.state; },
+           get menuPlaying(){ return !!menu.src; } };
 })();
 
 /* ============================ CANVAS / SCALING ========================== */
@@ -2022,6 +2090,12 @@ function updateVictory(dt){
 /* ============================== MAIN LOOP ============================== */
 function step(dt){
   G.t += dt;
+  // Menu music is stated as a rule, not toggled at each transition, so every
+  // route in and out is covered by construction. It owns title AND story --
+  // dismissing the menu into the scrolling tale must not break the loop --
+  // and ends only where startGame() flips us to 'playing', which is the
+  // moment Cindu becomes playable.
+  Audio2.menuMusic(G.state === 'title' || G.state === 'story');
   switch (G.state){
     case 'title':   updateWind(dt, 0.5); updateTitle(); break;
     case 'story':   updateWind(dt, 0.35); updateStory(dt); break;
