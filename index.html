@@ -73,6 +73,12 @@ const CFG = {
   // the action. Raise `dim` if the amber ever gets hard to read.
   BACKDROP: { src:'assets/bg_loop.webp', tileH:1144, speed:46, dim:0.55 },
 
+  // Cindu's painted flight sheet (assets/cindu_fly.webp): four wing keyframes
+  // side by side, each cell square. `dim` is the sprite's size in virtual
+  // units -- the cell is stored larger than that so it stays crisp on a
+  // high-density screen.
+  CINDU: { src:'assets/cindu_fly.webp', frames:4, dim:116 },
+
   SAVE_KEY: 'cindu_dragon_lord_save_v1',
   OPT_KEY:  'cindu_dragon_lord_opts_v1',
 };
@@ -620,6 +626,15 @@ function glowStroke(x, draw, opts){
   x.restore();
 }
 
+/* Which wing keyframe a flap counter is showing. The painted sheet holds four
+   positions and plays them out and back, so one beat is six steps; the
+   procedural fallback has three positions and just loops them. */
+const FLAP_CYCLE = { 3: [0,1,2], 4: [0,1,2,3,2,1] };
+function flapFrame(t, n){
+  const c = FLAP_CYCLE[n] || FLAP_CYCLE[3];
+  return c[((t|0) % c.length + c.length) % c.length];
+}
+
 const SPR = {};
 /* Box the sprite from the real geometry: widest wing tip vs longest tail,
    plus room for the glow. Guessing this by hand clips the wings. */
@@ -727,6 +742,36 @@ const BACKDROP = {
     }
     ctx.fillStyle = 'rgba(0,0,0,' + CFG.BACKDROP.dim + ')';
     ctx.fillRect(0, 0, CFG.W, CFG.H);
+  },
+};
+
+/* ------------------------- painted Cindu sprite ------------------------- */
+/* Slices assets/cindu_fly.webp into the frames `SPR.cindu` already holds. Each
+   cell becomes a canvas carrying `dim`, exactly what the procedural sprites
+   hand `blit`, so nothing downstream can tell the difference. Same contract as
+   BACKDROP: silent until the sheet decodes, and silent forever if it never
+   does -- Cindu then stays the amber wireframe the game shipped with. */
+const CINDU_ART = {
+  load(){
+    const im = new Image();
+    const slice = () => {
+      const n = CFG.CINDU.frames, cw = im.width / n;
+      if (!cw || im.height <= 0) return;
+      const cells = [];
+      for (let i = 0; i < n; i++){
+        const c = document.createElement('canvas');
+        c.width = cw; c.height = im.height;
+        c.getContext('2d').drawImage(im, i*cw, 0, cw, im.height,
+                                         0, 0, cw, im.height);
+        c.dim = CFG.CINDU.dim;
+        cells.push(c);
+      }
+      SPR.cindu = cells;
+    };
+    if (im.decode) { im.onload = () => im.decode().then(slice, slice); }
+    else           { im.onload = slice; }
+    im.onerror = () => {};              // stay a wireframe, say nothing
+    im.src = CFG.CINDU.src;
   },
 };
 
@@ -993,7 +1038,7 @@ function updatePlayer(dt){
   if (m > 1){ ax/=m; ay/=m; }
   P.x = clamp(P.x + ax * CFG.PLAYER.speed * dt, F.left, F.right);
   P.y = clamp(P.y + ay * CFG.PLAYER.speed * dt, F.top,  F.bottom);
-  P.flap += dt * (7 + Math.abs(ay)*4);
+  P.flap += dt * (12 + Math.abs(ay)*6);   // 6 steps to a beat now
   P.inv = Math.max(0, P.inv - dt);
   P.hurtFlash = Math.max(0, P.hurtFlash - dt*3);
 
@@ -1585,7 +1630,7 @@ function drawBoss(){
 }
 function drawPlayer(){
   if (P.dead) return;
-  const fr = ((P.flap|0) % 3 + 3) % 3;
+  const fr = flapFrame(P.flap, SPR.cindu.length);
   const blink = P.inv > 0 && (Math.floor(P.inv*18) % 2 === 0);
   blit(SPR.cindu[fr], P.x, P.y, 0, blink ? 0.4 : 1);
   if (P.hurtFlash > 0){
@@ -1845,7 +1890,8 @@ function drawTitle(){
   drawWind();
   titleDragonY -= 0.45;
   if (titleDragonY < 252) titleDragonY = 322;
-  blit(SPR.cindu[((G.t*7)|0)%3], CFG.W/2, titleDragonY, 0, 0.20, 1.2);
+  blit(SPR.cindu[flapFrame(G.t*7, SPR.cindu.length)],
+       CFG.W/2, titleDragonY, 0, 0.20, 1.2);
   glowTxt('C I N D U', CFG.W/2, 150, 44, CFG.AMBER, 'center', 22);
   glowTxt('DRAGON LORD', CFG.W/2, 196, 20, CFG.PURPLE, 'center', 14);
   txt('RECLAIM THE SCATTERED SOUL', CFG.W/2, 232, 12, amber(0.55));
@@ -1958,7 +2004,7 @@ function drawVictory(){
   ctx.fillStyle = 'rgba(0,0,0,' + clamp(G.endT*0.5, 0, 0.85) + ')';
   ctx.fillRect(0,0,CFG.W,CFG.H);
   glowTxt('THE DRAGON KING', CFG.W/2, 150, 26, CFG.AMBER, 'center', 20);
-  blit(SPR.cindu[((G.t*6)|0)%3], CFG.W/2, 250, 0, 0.9, 1.8);
+  blit(SPR.cindu[flapFrame(G.t*6, SPR.cindu.length)], CFG.W/2, 250, 0, 0.9, 1.8);
   for (let i=0;i<ENDING.length;i++){
     const a = clamp(G.endT*1.4 - i*0.35, 0, 1);
     txt(ENDING[i], CFG.W/2, 350 + i*22, 13, i > 5 ? purple(a) : amber(a*0.9));
@@ -2052,6 +2098,7 @@ document.addEventListener('visibilitychange', () => {
 buildSprites();
 buildWind();
 BACKDROP.load();
+CINDU_ART.load();
 resize();
 (function loadSave(){
   const rec = readSave();
