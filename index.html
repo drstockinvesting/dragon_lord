@@ -370,7 +370,13 @@ const Audio2 = (function(){
       [69,73,76,81].forEach((m,i)=>
         tone({type:'triangle', f0:mtof(m), dur:0.30, gain:0.16, t:t0+i*0.075}));
     },
-    shard(){ tone({type:'triangle', f0:1180, f1:1760, dur:0.06, gain:0.045, slide:'exp'}); },
+    // `p` is progress through the current ten (0..1). The pitch climbs across
+    // a soul, so the tenth shard audibly completes one without a separate cue.
+    shard(p){
+      const k = clamp(p || 0, 0, 1);
+      tone({type:'triangle', f0:1180*(1+k*0.55), f1:1760*(1+k*0.55),
+            dur:0.06, gain:0.045, slide:'exp'});
+    },
     soul(){
       const t0 = now();
       [76,83].forEach((m,i)=> tone({type:'triangle', f0:mtof(m), dur:0.22, gain:0.10, t:t0+i*0.06}));
@@ -1051,7 +1057,7 @@ const G = {
   spawnTimer:2.2,
   boss:null, bossIntro:0, bossWin:0,
   powerTimer:CFG.POWER.cooldown, powerFx:null,
-  shake:0, flash:0, card:null, cardT:0,
+  shake:0, flash:0, levelFx:0, card:null, cardT:0,
   hasSave:false, checkpoint:null,
   menuIdx:0, storyT:0, endT:0,
   frameMs:0,
@@ -1286,15 +1292,26 @@ function damageEnemy(e, i, amount, burnFor){
    A dragon lord is worth one whole soul.
    ======================================================================== */
 function addShards(n){
-  G.shards += n;
-  Audio2.SFX.shard();
-  while (G.shards >= CFG.SHARDS_PER_SOUL){ G.shards -= CFG.SHARDS_PER_SOUL; addSouls(1); }
+  for (let i=0;i<n;i++){
+    G.shards++;
+    // Smallest tier: a rising pitch and two sparks. Deliberately no shake and
+    // no flash -- this fires on every single kill, and anything heavier would
+    // never let up.
+    Audio2.SFX.shard(G.shards / CFG.SHARDS_PER_SOUL);
+    burst(P.x, P.y - 18, 2, 70, false, 3);
+    if (G.shards >= CFG.SHARDS_PER_SOUL){ G.shards -= CFG.SHARDS_PER_SOUL; addSouls(1); }
+  }
 }
 function addSouls(n){
   for (let i=0;i<n;i++){
     G.souls++;
     Audio2.SFX.soul();
     floater(P.x, P.y - 44, 'FIRE SOUL', true);
+    // Middle tier: a body of particles and a nudge, but it does not take the
+    // screen -- that is reserved for a level.
+    burst(P.x, P.y, 14, 150, true, 5);
+    G.shake = Math.max(G.shake, 8);
+    G.flash = Math.max(G.flash, 0.22);
     if (G.souls >= CFG.SOULS_PER_LEVEL){ G.souls -= CFG.SOULS_PER_LEVEL; levelUp(); }
   }
 }
@@ -1307,6 +1324,8 @@ function levelUp(){
   floater(P.x, P.y - 68, 'LEVEL ' + G.level, false);
   showCard('SOUL RESTORED', 'LEVEL ' + G.level + '  -  DMG / RATE / VITALITY UP');
   G.flash = 0.55;
+  G.shake = Math.max(G.shake, 14);
+  G.levelFx = 1;                      // drives the soul-core bloom on Cindu
   burst(P.x, P.y, 26, 200, true, 6);
 }
 function updatePowerTier(){
@@ -1598,6 +1617,7 @@ function updateFx(dt){
   }
   G.shake = Math.max(0, G.shake - dt*34);
   G.flash = Math.max(0, G.flash - dt*2.4);
+  G.levelFx = Math.max(0, G.levelFx - dt*1.15);
   if (G.cardT > 0) G.cardT -= dt; else G.card = null;
 }
 
@@ -1642,7 +1662,7 @@ function startGame(snap){
   P.x = CFG.W/2; P.y = F.bottom - 80; P.dead = false; P.inv = 1.4;
   P.cool = 0; P.hurtFlash = 0;
   G.powerTimer = CFG.POWER.cooldown;
-  G.spawnTimer = 2.4; G.shake = 0; G.flash = 0; G.endT = 0;
+  G.spawnTimer = 2.4; G.shake = 0; G.flash = 0; G.levelFx = 0; G.endT = 0;
   IN.powerEdge = false; IN.pauseEdge = false; IN.tap = null; IN.power = false;
   G.state = 'playing';
   Audio2.setTrack('triumph', G.phase);
@@ -1734,6 +1754,11 @@ function drawPlayer(){
     const pulse = 0.35 + 0.3*Math.sin(G.t*5);
     blit(SPR.core, P.x, P.y, 0, pulse);
   }
+  // SPR.core was built "for the level-up flash" but until now only ever drew
+  // the power-ready pulse. On a level it finally does that job: blooming
+  // outward from Cindu and fading.
+  if (G.levelFx > 0.01)
+    blit(SPR.core, P.x, P.y, 0, G.levelFx * 0.85, 1 + (1 - G.levelFx) * 1.8);
 }
 /* Cindu's breath by tier: 0 a thin bolt, 4 a roaring fireball. Everything
    stays stroke-and-glow so it sits inside the game's neon look. */
