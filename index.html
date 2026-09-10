@@ -580,7 +580,18 @@ const Audio2 = (function(){
            // yet, or this site's sound is blocked outright in its settings.
            get blocked(){ return !ctx || ctx.state !== 'running'; },
            get menuState(){ return menu.state; },
-           get menuPlaying(){ return !!menu.src; } };
+           get menuPlaying(){ return !!menu.src; },
+           // Everything the menu-music path can be wrong about, in one place,
+           // for __CINDU.stats(). A silent menu is a five-field question:
+           // which state the load reached, whether the context is running,
+           // whether the bus is open, and whether a source is on it.
+           get diag(){
+             return { menuState:menu.state, playing:!!menu.src, ready,
+                      ctxState: ctx ? ctx.state : 'none',
+                      musicOpt: opt.music, sfxOpt: opt.sfx,
+                      musBus: musBus ? +musBus.gain.value.toFixed(3) : null,
+                      loopEnd: menu.buf ? +menu.buf.duration.toFixed(3) : null };
+           } };
 })();
 
 /* ============================ CANVAS / SCALING ========================== */
@@ -2370,10 +2381,11 @@ window.__CINDU = {
   summon: spawnLord,
   spawn: spawnEnemy, ARCHETYPES, fireTier,
   power(){ G.powerTimer = CFG.POWER.cooldown; P.hp = P.maxHP; firePower(); },
-  stats(){ return { state:G.state, kills:G.kills, level:G.level, phase:G.phase,
-                    lords:G.lordsKilled, tier:G.powerTier, hp:P.hp, maxHP:P.maxHP,
-                    enemies:pools.en.active.length, eb:pools.eb.active.length,
-                    frameMs:+G.frameMs.toFixed(2) }; },
+  stats(){ return { build:BUILD, state:G.state, kills:G.kills, level:G.level,
+                    phase:G.phase, lords:G.lordsKilled, tier:G.powerTier,
+                    hp:P.hp, maxHP:P.maxHP, enemies:pools.en.active.length,
+                    eb:pools.eb.active.length, frameMs:+G.frameMs.toFixed(2),
+                    audio:Audio2.diag }; },
 };
 </script>
 </body>
