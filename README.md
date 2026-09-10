@@ -208,14 +208,42 @@ download before a note sounded, which reads as broken rather than loading.
 **That gesture is what the start screen is for.** The name, Cindu hovering, and a
 single `START` button — any key or any tap takes it. Pressing it unlocks the audio
 context, so by the time the menu draws the chant is already playing rather than
-waiting for the player to happen to touch something. If it is not singing yet the
-menu says **THE CHANT IS RISING...** while the file is still on the wire, and
-**THE CHANT IS LOST** if the load failed, so a silent menu is always explained
-rather than merely silent. A failed load latches and is never retried --
-`decodeAudioData` detaches its buffer, so there is nothing left to retry with.
-(A Chromium build without the proprietary AAC decoder — the Playwright bundle,
-for one — always lands on **THE CHANT IS LOST**. Real Chrome, Safari and Firefox
-decode it fine.)
+waiting for the player to happen to touch something.
+
+Getting that unlock to actually land takes three things, and the menu was silent
+until all three were true:
+
+- **Unlock on every event that might carry the activation.** Browsers disagree
+  about which one grants it: Chrome takes a mouse `pointerdown`, but a touch is
+  not activated until the finger comes up, and Safari counts `touchend`. Asking
+  on `pointerdown` alone means the first tap on a phone asks a moment too early.
+  So `pointerdown`, `pointerup`, `touchend` and `click` all call `unlock()`,
+  passively, alongside the keyboard's own.
+- **Keep asking.** A `resume()` the browser refuses may never settle either way,
+  so a single call that goes nowhere used to leave the menu silent until some
+  later tap happened to land after activation — which is exactly what "toggle
+  the sound off and on and then it plays" was. `resumeCtx()` now retries from
+  every frame the menu wants music, throttled to four times a second rather
+  than latched on a flag.
+- **Decode before the context runs.** `decodeAudioData` needs a context, not a
+  *running* one. Decoding as soon as one exists means the buffer is already
+  there when the browser relents, and the chant starts on that frame instead of
+  a decode later.
+
+`unlock()` also starts a one-sample silent buffer, once: Safari will hand back a
+context that reports `running` and still refuses to make a sound until something
+has been started from inside a real gesture.
+
+If it is not singing yet the menu says which silence it is — **THE CHANT IS
+RISING...** while the file is still on the wire, **CLICK/TAP ANYWHERE FOR SOUND**
+while the browser is still holding the context shut (which should clear within a
+frame or two of arriving, since `START` was a gesture; if it persists, this
+site's sound is switched off in the browser's own settings and only the player
+can undo that), and **THE CHANT IS LOST** if the load failed. A failed load
+latches and is never retried — `decodeAudioData` detaches its buffer, so there is
+nothing left to retry with. (A Chromium build without the proprietary AAC decoder
+— the Playwright bundle, for one — always lands on **THE CHANT IS LOST**. Real
+Chrome, Safari and Firefox decode it fine.)
 
 Stable Audio 3's Community License requires registration for commercial use.
 

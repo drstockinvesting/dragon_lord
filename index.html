@@ -249,10 +249,41 @@ const Audio2 = (function(){
     for (let i=0;i<n;i++) d[i] = Math.random()*2-1;
     ready = true;
   }
-  // iOS/Safari and Chrome autoplay policy: must resume inside a user gesture.
+  /* Autoplay policy: a context only starts once the browser has granted the
+     page user activation, and browsers disagree about which event grants it.
+     Chrome takes a mouse pointerdown, but a touch is not activated until the
+     finger comes up -- so a resume() fired from pointerdown alone can go
+     nowhere, and on the old code nothing ever asked again: the menu sat silent
+     until some later tap happened to land after activation, which is what
+     "toggle the sound off and on and then it plays" actually was. So retry
+     instead of asking once, time-throttled rather than latched on a flag,
+     since a resume() the browser refuses may never settle either way. */
+  let lastResume = 0;
+  function resumeCtx(){
+    if (!ctx || ctx.state !== 'suspended') return;
+    const t = performance.now();
+    if (t - lastResume < 250) return;
+    lastResume = t;
+    ctx.resume().catch(()=>{});
+  }
+  let kicked = false;
   function unlock(){
     init();
-    if (ctx && ctx.state === 'suspended') ctx.resume().catch(()=>{});
+    if (!ctx) return;
+    resumeCtx();
+    // Safari will hand back a context that reports 'running' and still refuses
+    // to make a sound until something has been started from inside a real
+    // gesture. A one-sample silent buffer is the standard toll: inaudible,
+    // paid once, and harmless everywhere else.
+    if (!kicked){
+      kicked = true;
+      try {
+        const s = ctx.createBufferSource();
+        s.buffer = ctx.createBuffer(1, 1, 22050);
+        s.connect(ctx.destination);
+        s.start(0);
+      } catch(e){}
+    }
   }
   const now = () => ctx ? ctx.currentTime : 0;
   const mtof = m => 440 * Math.pow(2,(m-69)/12);
@@ -526,10 +557,15 @@ const Audio2 = (function(){
   // Called every frame with "should the menu be singing right now?".
   function menuMusic(on){
     if (!on){ menuStop(); return; }
-    if (!ready || !ctx || ctx.state !== 'running') return;   // pre-gesture: wait
+    if (!ready || !ctx) return;                     // no gesture yet, no context
+    // Decoding needs a context but not a running one, so it runs as soon as
+    // there is one. By the time the browser lets the page make a sound the
+    // buffer is already sitting there and the chant starts on that same frame,
+    // rather than a decode later.
     if (menu.state === 'idle') menuPrefetch();      // gesture beat the network
     else if (menu.state === 'fetched') menuDecode();
-    else if (menu.state === 'ready') menuStart();
+    if (ctx.state !== 'running'){ resumeCtx(); return; }
+    if (menu.state === 'ready') menuStart();
   }
 
   function setOpt(k,v){
@@ -540,8 +576,22 @@ const Audio2 = (function(){
   }
   return { unlock, SFX, setTrack, stopMusic, menuMusic, menuPrefetch, setOpt, opt,
            get ready(){ return ready; },
+           // The browser is holding the context shut: no gesture has landed
+           // yet, or this site's sound is blocked outright in its settings.
+           get blocked(){ return !ctx || ctx.state !== 'running'; },
            get menuState(){ return menu.state; },
-           get menuPlaying(){ return !!menu.src; } };
+           get menuPlaying(){ return !!menu.src; },
+           // Everything the menu-music path can be wrong about, in one place,
+           // for __CINDU.stats(). A silent menu is a five-field question:
+           // which state the load reached, whether the context is running,
+           // whether the bus is open, and whether a source is on it.
+           get diag(){
+             return { menuState:menu.state, playing:!!menu.src, ready,
+                      ctxState: ctx ? ctx.state : 'none',
+                      musicOpt: opt.music, sfxOpt: opt.sfx,
+                      musBus: musBus ? +musBus.gain.value.toFixed(3) : null,
+                      loopEnd: menu.buf ? +menu.buf.duration.toFixed(3) : null };
+           } };
 })();
 
 /* ============================ CANVAS / SCALING ========================== */
@@ -978,8 +1028,15 @@ cv.addEventListener('contextmenu', e => e.preventDefault());
 // The canvas is letterboxed, so on a desktop window most of the page is margin
 // around it. A click out there is still a user gesture, and the audio unlock
 // should take it -- otherwise the first thing a mouse user clicks can do
-// nothing at all. Listen-only: no preventDefault, so it changes nothing else.
-window.addEventListener('pointerdown', () => Audio2.unlock(), { passive:true });
+// nothing at all. Listen-only: no preventDefault, so nothing else changes.
+//
+// All four events, because they are not interchangeable: Chrome grants user
+// activation on a mouse pointerdown but withholds it for a touch until the
+// finger lifts, and Safari counts touchend. Unlocking on pointerdown alone
+// means the first tap on a phone asks for audio a moment before the browser is
+// willing to give it, and never asks again.
+for (const ev of ['pointerdown','pointerup','touchend','click'])
+  window.addEventListener(ev, () => Audio2.unlock(), { passive:true });
 
 function showPad(){ return IN.touchSeen || IS_TOUCH; }
 function takeTap(){ const t = IN.tap; IN.tap = null; return t; }
@@ -1073,7 +1130,7 @@ function applyStats(keepRatio){
 }
 function currentTier(){ return POWER_TIERS[G.powerTier]; }
 
-/* Cindu's breath grows with her damage: 0 is the thin starting bolt, 4 is a
+/* Cindu's breath grows with his damage: 0 is the thin starting bolt, 4 is a
    full fireball. Thresholds are damage multiples, so the flame keeps pace
    with the stat rather than with a raw level count. */
 function fireTier(){
@@ -2075,8 +2132,15 @@ function drawTitle(){
   // says so instead of promising sound that will never arrive.
   if (Audio2.opt.music && !Audio2.menuPlaying){
     const lost = Audio2.menuState === 'failed';
-    txt(lost ? 'THE CHANT IS LOST' : 'THE CHANT IS RISING...',
-        CFG.W/2, 400 + (items.length-1)*62 + 52, 12,
+    // Three silences, three different things to say. Blocked should clear
+    // itself within a frame or two of arriving here, since START was a
+    // gesture -- if it persists, this site's sound is switched off in the
+    // browser's own settings and only the player can undo that.
+    const msg = lost      ? 'THE CHANT IS LOST'
+              : Audio2.blocked ? (showPad() ? 'TAP ANYWHERE FOR SOUND'
+                                            : 'CLICK ANYWHERE FOR SOUND')
+              : 'THE CHANT IS RISING...';
+    txt(msg, CFG.W/2, 400 + (items.length-1)*62 + 52, 12,
         lost ? amber(0.32) : purple(0.5 + 0.35*Math.sin(G.t*3.2)));
   }
   const help = showPad()
@@ -2317,10 +2381,11 @@ window.__CINDU = {
   summon: spawnLord,
   spawn: spawnEnemy, ARCHETYPES, fireTier,
   power(){ G.powerTimer = CFG.POWER.cooldown; P.hp = P.maxHP; firePower(); },
-  stats(){ return { state:G.state, kills:G.kills, level:G.level, phase:G.phase,
-                    lords:G.lordsKilled, tier:G.powerTier, hp:P.hp, maxHP:P.maxHP,
-                    enemies:pools.en.active.length, eb:pools.eb.active.length,
-                    frameMs:+G.frameMs.toFixed(2) }; },
+  stats(){ return { build:BUILD, state:G.state, kills:G.kills, level:G.level,
+                    phase:G.phase, lords:G.lordsKilled, tier:G.powerTier,
+                    hp:P.hp, maxHP:P.maxHP, enemies:pools.en.active.length,
+                    eb:pools.eb.active.length, frameMs:+G.frameMs.toFixed(2),
+                    audio:Audio2.diag }; },
 };
 </script>
 </body>
