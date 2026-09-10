@@ -10,8 +10,8 @@ and on a desktop keyboard.
 
 Bookmark that. It is the same URL forever, and it always serves whatever is
 merged to `main` — every push to `main` redeploys it, usually within a minute or
-two. The title screen prints the build date and commit at the bottom, so you can
-always tell which version you just got. Your saved run lives in the browser's
+two. The start and title screens print the build date and commit at the bottom,
+so you can always tell which version you just got. Your saved run lives in the browser's
 `localStorage` for that URL, so progress survives every update.
 
 To run it from a checkout instead, open `index.html` in any modern browser and
@@ -60,6 +60,10 @@ Fly. Burn. Reclaim the throne.
 - **Lower right:** `FIRE` (hold to repeat) and `POWER` (with a cooldown ring).
 
 Both work at once; the two thumbs are tracked independently.
+
+The start screen takes any key or any tap, wherever it lands — the `START` button
+is the affordance, not a target you have to hit. `M` is the exception there: it
+mutes without moving on.
 
 ---
 
@@ -150,6 +154,23 @@ never ends. The image was generated locally with ComfyUI and SDXL; the workflows
 and the script that made it live in the `comfyUI-setup` repo under `workflows/` and
 `scripts/generate_backgrounds.py`.
 
+On the start and title screens Cindu hovers rather than travels: the wings beat
+through the same four painted frames as in flight, but he holds his station,
+with only a 3px bob so he does not read as a decal. `HOVER_BOB` next to
+`drawCinduHover()` is the knob; 0 nails him down completely.
+
+He is sized to fill the screen: at the widest point of the flap the wingtips
+land 24px from each edge (`HOVER_SPAN`). That scale is measured from the art
+rather than picked by hand — `blit` squashes a sprite cell into a `dim`-square,
+so `cinduSpanFrac()` reads the widest frame's share of its cell once and caches
+it. The painted sheet is cut flush at the cell edge on the downbeat; the
+wireframe fallback carries a lot of glow padding around a narrower dragon, and
+would be half the size under a fixed scale. `SPAN_ALPHA` is what counts as wing:
+measuring the soft halo instead of the membrane would size him by his glow and
+leave the wings visibly short. `HOVER_ALPHA` fades him: 0.20 on the start
+screen, 0.12 on the menu, where four buttons and a line of status text lie
+across him and he is a watermark rather than the subject.
+
 The vector art was tuned against pure black, so a black scrim sits between the
 backdrop and the action. **`CFG.BACKDROP.dim` is the knob** — raise it toward 1 if
 the amber is ever hard to read, drop it toward 0 to let the landscape through.
@@ -166,7 +187,7 @@ this is chiptune, not an orchestra.
 The one exception is `assets/menu_loop.m4a`, the title music: a 30.000s dark
 Gregorian chant loop — low male choir over an organ drone at about 72 Hz, with a
 slow funeral bell — generated with Stable Audio 3 and cut to an exact seamless
-loop with a two-second equal-power crossfade. It plays across the title screen
+loop with a two-second equal-power crossfade. It plays across the title menu
 *and* the scrolling tale, then fades out over 0.35s the moment `startGame()` makes
 Cindu playable, handing off to the synth tracks. That rule is stated once, at the
 top of `step()`, rather than toggled at each screen transition, so every route in
@@ -182,11 +203,19 @@ a key or click: every browser refuses to start audio before a user gesture, and
 no amount of preloading changes that. So the two halves are split. `fetch` needs
 no `AudioContext` and runs immediately; only `decodeAudioData` and playback wait
 for the gesture. Without that split the first key press paid for a 480KB
-download before a note sounded, which reads as broken rather than loading. The
-title screen says **PRESS ANY KEY FOR SOUND** until it is singing, so a silent
-menu is explained instead of merely silent. A failed load latches and is never
-retried -- `decodeAudioData` detaches its buffer, so there is nothing left to
-retry with.
+download before a note sounded, which reads as broken rather than loading.
+
+**That gesture is what the start screen is for.** The name, Cindu hovering, and a
+single `START` button — any key or any tap takes it. Pressing it unlocks the audio
+context, so by the time the menu draws the chant is already playing rather than
+waiting for the player to happen to touch something. If it is not singing yet the
+menu says **THE CHANT IS RISING...** while the file is still on the wire, and
+**THE CHANT IS LOST** if the load failed, so a silent menu is always explained
+rather than merely silent. A failed load latches and is never retried --
+`decodeAudioData` detaches its buffer, so there is nothing left to retry with.
+(A Chromium build without the proprietary AAC decoder — the Playwright bundle,
+for one — always lands on **THE CHANT IS LOST**. Real Chrome, Safari and Firefox
+decode it fine.)
 
 Stable Audio 3's Community License requires registration for commercial use.
 
@@ -233,7 +262,7 @@ GitHub Pages. It calls `scripts/build-site.py`, which assembles `_site/` and doe
 the two things the source file cannot do for itself:
 
 - rewrites `const BUILD = 'dev'` to the commit date and short sha, which is what
-  the title screen shows;
+  the start and title screens show;
 - appends a content hash to each `assets/` URL, so a changed backdrop or sprite
   sheet is refetched instead of being served from a stale browser cache.
 
